@@ -40,116 +40,67 @@ Slugs match `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` (1–64 chars, lowercase + 
 git clone https://github.com/sdunietz/wwwshare.git
 cd wwwshare
 npm install
-```
-
-You need a dev bearer token. Anything works for local — pick a string:
-
-```sh
 echo "WWWSHARE_UPLOAD_TOKEN=devtoken" > worker/.dev.vars
-```
-
-Run the worker:
-
-```sh
-npm run dev
-# → http://localhost:8787
-```
-
-Configure the CLI to talk to it:
-
-```sh
 cp cli/.env.example cli/.env
-# the example already points at http://localhost:8787 with token=devtoken
 ```
 
-Run the CLI:
+Both `worker/.dev.vars` and `cli/.env` are gitignored. `cli/.env.example` already points at `http://localhost:8787` with `token=devtoken`, matching `worker/.dev.vars`.
+
+```sh
+npm test            # 113 tests
+npm run dev         # http://localhost:8787 (ctrl-C to stop)
+```
+
+In another shell:
 
 ```sh
 node cli/src/wwwshare.mjs ./some-file.html my-slug
 ```
 
-Run the tests:
-
-```sh
-npm test
-```
-
 ## Deploying to Cloudflare
 
-You'll need a Cloudflare account with Workers + R2 enabled.
+Prereqs: a Cloudflare account with Workers + R2 enabled, and `npx wrangler login` already run.
 
-### 1. Create the R2 bucket
+The whole prod setup is one shell block. It creates the bucket, deploys the Worker, generates a 256-bit random token, sets it both as a Worker secret and in your local CLI config — no copy-paste.
 
 ```sh
+cd worker
+
+# Create the prod R2 bucket. Edit wrangler.prod.toml if you want a
+# different bucket name.
 npx wrangler r2 bucket create wwwshare-content
-```
 
-The dev config (`worker/wrangler.toml`) uses `wwwshare-content-dev`; production should use a different bucket name. Create a `worker/wrangler.prod.toml` (gitignored secrets, committed config) that points at the prod bucket:
+# Deploy. Captures the workers.dev URL for the CLI config below.
+# Safe to deploy before setting the secret: src/auth.js fails closed
+# while WWWSHARE_UPLOAD_TOKEN is unset, so the Worker 401s on every
+# upload until the secret is in place.
+DEPLOY_OUT=$(npx wrangler deploy --config wrangler.prod.toml 2>&1 | tee /dev/tty)
+DEPLOY_URL=$(printf '%s\n' "$DEPLOY_OUT" | grep -oE 'https://[a-z0-9.-]+\.workers\.dev' | head -1)
 
-```toml
-name = "wwwshare"
-main = "src/index.js"
-compatibility_date = "2026-05-13"
+# Generate token, set as Worker secret, write local CLI config.
+TOKEN=$(node -e 'console.log(require("crypto").randomBytes(32).toString("base64url"))')
+printf '%s' "$TOKEN" | npx wrangler secret put WWWSHARE_UPLOAD_TOKEN --config wrangler.prod.toml
 
-[[r2_buckets]]
-binding = "WWWSHARE_BUCKET"
-bucket_name = "wwwshare-content"
-```
-
-### 2. Generate and set the upload secret
-
-Generate a strong random token locally:
-
-```sh
-node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
-```
-
-Then store it as a Worker secret:
-
-```sh
-cd worker
-npx wrangler secret put WWWSHARE_UPLOAD_TOKEN --config wrangler.prod.toml
-# paste the token when prompted
-```
-
-You'll use the same token from the CLI side.
-
-### 3. Deploy
-
-```sh
-cd worker
-npx wrangler deploy --config wrangler.prod.toml
-```
-
-By default this serves on `https://wwwshare.<your-account>.workers.dev`. To put it on a real domain (recommended — see Security below), bind a route in the Cloudflare dashboard or via `wrangler`.
-
-### 4. Configure the CLI for production
-
-The CLI loads config from a `.env` file in one of two places (whichever
-it finds first; shell env vars always win):
-
-1. `cli/.env` — next to the script, for hacking on the repo.
-2. `~/.config/wwwshare/.env` (or `$XDG_CONFIG_HOME/wwwshare/.env`) — for
-   the symlinked-into-PATH install.
-
-Pick whichever fits your workflow:
-
-```sh
-# Installed-CLI layout (recommended):
 mkdir -p ~/.config/wwwshare
-cat > ~/.config/wwwshare/.env <<EOF
-WWWSHARE_ENDPOINT=https://wwwshare.example.com
-WWWSHARE_UPLOAD_TOKEN=<the token you generated>
+( umask 077 && cat > ~/.config/wwwshare/.env <<EOF
+WWWSHARE_ENDPOINT=$DEPLOY_URL
+WWWSHARE_UPLOAD_TOKEN=$TOKEN
 EOF
-chmod 600 ~/.config/wwwshare/.env
+)
+
+echo "✓ Deployed to $DEPLOY_URL"
+echo "✓ CLI config at ~/.config/wwwshare/.env (mode 0600)"
 ```
 
-### 5. (Optional) Install the CLI on your PATH
+If you want a custom domain (recommended — see Security below), bind a route in the Cloudflare dashboard and update `WWWSHARE_ENDPOINT` in `~/.config/wwwshare/.env`.
 
-Either `npm link` from `cli/`, or symlink the script:
+To rotate the token later, re-run the `TOKEN=…` line through the `~/.config/wwwshare/.env` write.
+
+### Install the CLI on your PATH
 
 ```sh
-ln -s "$PWD/cli/src/wwwshare.mjs" ~/bin/wwwshare
+ln -s "$(pwd)/../cli/src/wwwshare.mjs" ~/bin/wwwshare   # from worker/
+# or: ln -s "$PWD/cli/src/wwwshare.mjs" ~/bin/wwwshare   # from repo root
 ```
 
 ## Usage
@@ -191,7 +142,7 @@ Practical implications:
 
 1. **Use a separate origin/subdomain from anything cookie-authenticated.** A dedicated subdomain (e.g. `pages.example.com`) keeps the script grant from leaking into your main site's cookie scope.
 2. **Generate a strong token** (the snippet above gives ~256 bits) and rotate it if it ever leaks. To rotate, `wrangler secret put WWWSHARE_UPLOAD_TOKEN --config wrangler.prod.toml` again.
-3. **Reads are unauthenticated, "unlisted by obscurity."** Anyone who knows or guesses a slug can fetch the page. Short, human-readable slugs are easier to guess than `kshare`-style 8-char random ones — use longer or less guessable slugs for anything you want to keep semi-private.
+3. **Reads are unauthenticated, "unlisted by obscurity."** Anyone who knows or guesses a slug can fetch the page. Short, human-readable slugs are easy to guess — use longer or less guessable slugs for anything you want to keep semi-private.
 
 For more on the trust boundary, see comments in `worker/src/upload.js` and `worker/src/read.js`.
 
@@ -206,7 +157,3 @@ WWWSHARE_BUCKET/
 That's the whole R2 layout. The directory shape leaves room to grow per-page assets (e.g. `{slug}/img/foo.png`) without a key migration; today, nothing else lives there.
 
 Upload writes a single R2 object atomically. Readers either see the page or 404 — no partial states. (Concurrent writers can still last-write-win on the same slug; for single-user CLI use that's fine.)
-
-## License
-
-MIT.

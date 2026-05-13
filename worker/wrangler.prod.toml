@@ -1,0 +1,14 @@
+name = "wwwshare"
+main = "src/index.js"
+compatibility_date = "2026-05-13"
+
+# Edit `bucket_name` if you create the prod bucket under a different
+# name (the setup block in README.md assumes `wwwshare-content`).
+[[r2_buckets]]
+binding = "WWWSHARE_BUCKET"
+bucket_name = "wwwshare-content"
+
+# WWWSHARE_UPLOAD_TOKEN is set via `wrangler secret put`, not committed
+# here. The auth check in src/auth.js fails closed when the secret is
+# absent, so a not-yet-configured deploy serves 401 on every upload —
+# safe to deploy before the secret is set.
