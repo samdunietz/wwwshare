@@ -86,6 +86,14 @@ export async function handleUpload(request, env) {
   // overwriting.
   const isUpdate = updateFields.length === 1 && updateFields[0] === "1";
 
+  const trustedFields = form.getAll("trusted");
+  if (trustedFields.length > 1) {
+    return jsonResponse({ error: "duplicate trusted" }, 400);
+  }
+  // Per-upload, not sticky: an update without trusted=1 demotes a
+  // previously trusted page back to sandboxed.
+  const isTrusted = trustedFields.length === 1 && trustedFields[0] === "1";
+
   const key = `${slug}/index.html`;
   const existing = await env.WWWSHARE_BUCKET.head(key);
   if (isUpdate && !existing) {
@@ -95,12 +103,16 @@ export async function handleUpload(request, env) {
     return jsonResponse({ error: "slug exists" }, 409);
   }
 
+  const putOptions = {
+    httpMetadata: { contentType: TEXT_HTML },
+  };
+  if (isTrusted) {
+    putOptions.customMetadata = { trusted: "1" };
+  }
   // HEAD-then-PUT is NOT atomic across concurrent writers — two creates
   // for the same slug can both pass the HEAD and last-write-wins.
   // Acceptable for single-user CLI; documented, not solved.
-  await env.WWWSHARE_BUCKET.put(key, await htmlPart.arrayBuffer(), {
-    httpMetadata: { contentType: TEXT_HTML },
-  });
+  await env.WWWSHARE_BUCKET.put(key, await htmlPart.arrayBuffer(), putOptions);
 
   const url = `${new URL(request.url).origin}/p/${slug}`;
   return jsonResponse({ url, slug }, isUpdate ? 200 : 201);

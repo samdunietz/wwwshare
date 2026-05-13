@@ -7,10 +7,12 @@ const TOKEN = "devtoken";
 const AUTH = `Bearer ${TOKEN}`;
 const ORIGIN = "http://example.com";
 
-async function seedPage(slug, bytes) {
-  await env.WWWSHARE_BUCKET.put(`${slug}/index.html`, bytes, {
+async function seedPage(slug, bytes, { trusted } = {}) {
+  const options = {
     httpMetadata: { contentType: "text/html; charset=utf-8" },
-  });
+  };
+  if (trusted) options.customMetadata = { trusted: "1" };
+  await env.WWWSHARE_BUCKET.put(`${slug}/index.html`, bytes, options);
 }
 
 describe("/p/{slug} — GET", () => {
@@ -67,6 +69,50 @@ describe("/p/{slug} — HEAD", () => {
   it("404 on a missing slug", async () => {
     const res = await SELF.fetch(`${ORIGIN}/p/missing`, { method: "HEAD" });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("/p/{slug} — CSP varies by trust", () => {
+  beforeEach(() => clearBucket(env));
+
+  it("default page gets sandboxed CSP (no customMetadata.trusted)", async () => {
+    await seedPage("sandboxed-default", "<p>hi</p>");
+    const res = await SELF.fetch(`${ORIGIN}/p/sandboxed-default`);
+    expect(res.status).toBe(200);
+    const csp = res.headers.get("Content-Security-Policy");
+    // Drain the body so R2's isolated-storage stack can pop at teardown.
+    await res.arrayBuffer();
+    expect(csp).toContain("sandbox allow-scripts");
+    expect(csp).toContain("allow-popups");
+    expect(csp).toContain("allow-modals");
+    expect(csp).toContain("allow-top-navigation-by-user-activation");
+    expect(csp).not.toContain("allow-same-origin");
+  });
+
+  it("trusted page gets the non-sandbox CSP", async () => {
+    await seedPage("trusted", "<p>hi</p>", { trusted: true });
+    const res = await SELF.fetch(`${ORIGIN}/p/trusted`);
+    expect(res.status).toBe(200);
+    const csp = res.headers.get("Content-Security-Policy");
+    await res.arrayBuffer();
+    expect(csp).not.toContain("sandbox");
+    expect(csp).toContain("script-src 'unsafe-inline'");
+  });
+
+  it("HEAD on sandboxed page returns sandbox CSP", async () => {
+    await seedPage("sandbox-head", "<p>hi</p>");
+    const res = await SELF.fetch(`${ORIGIN}/p/sandbox-head`, {
+      method: "HEAD",
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Security-Policy")).toContain("sandbox");
+  });
+
+  it("HEAD on trusted page returns non-sandbox CSP", async () => {
+    await seedPage("trust-head", "<p>hi</p>", { trusted: true });
+    const res = await SELF.fetch(`${ORIGIN}/p/trust-head`, { method: "HEAD" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Security-Policy")).not.toContain("sandbox");
   });
 });
 

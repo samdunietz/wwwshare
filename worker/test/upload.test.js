@@ -15,6 +15,7 @@ function buildForm({
   slug = "test-slug",
   html = "<!doctype html><title>x</title>",
   update,
+  trusted,
   omitSlug,
   omitHtml,
   htmlAsString,
@@ -22,6 +23,7 @@ function buildForm({
   extraHtml,
   extraHtmlString,
   extraUpdate,
+  extraTrusted,
 } = {}) {
   const form = new FormData();
   if (!omitSlug) form.append("slug", slug);
@@ -41,6 +43,8 @@ function buildForm({
   }
   if (update !== undefined) form.append("update", update);
   if (extraUpdate !== undefined) form.append("update", extraUpdate);
+  if (trusted !== undefined) form.append("trusted", trusted);
+  if (extraTrusted !== undefined) form.append("trusted", extraTrusted);
   return form;
 }
 
@@ -289,6 +293,76 @@ describe("/upload — conflict + update", () => {
     expect(body).toEqual({ url: `${ORIGIN}/p/live`, slug: "live" });
     const obj = await readKey("live");
     expect(await obj.text()).toBe("<p>v2</p>");
+  });
+});
+
+describe("/upload — trusted field", () => {
+  beforeEach(() => clearBucket(env));
+
+  it("400 duplicate trusted fields", async () => {
+    const res = await postUpload(
+      buildForm({ slug: "abc", trusted: "1", extraTrusted: "1" }),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("duplicate trusted");
+  });
+
+  it("missing trusted → R2 object has no customMetadata.trusted (sandboxed)", async () => {
+    const res = await postUpload(buildForm({ slug: "default-trust" }));
+    expect(res.status).toBe(201);
+    const obj = await headKey("default-trust");
+    expect(obj.customMetadata?.trusted).toBeUndefined();
+  });
+
+  it("trusted=1 → R2 object has customMetadata.trusted === '1'", async () => {
+    const res = await postUpload(
+      buildForm({ slug: "trusted-page", trusted: "1" }),
+    );
+    expect(res.status).toBe(201);
+    const obj = await headKey("trusted-page");
+    expect(obj.customMetadata?.trusted).toBe("1");
+  });
+
+  it("trusted=0 → treated as untrusted (no customMetadata.trusted)", async () => {
+    const res = await postUpload(
+      buildForm({ slug: "zero-trust", trusted: "0" }),
+    );
+    expect(res.status).toBe(201);
+    const obj = await headKey("zero-trust");
+    expect(obj.customMetadata?.trusted).toBeUndefined();
+  });
+
+  it("trusted=true → treated as untrusted (strict, only '1' counts)", async () => {
+    const res = await postUpload(
+      buildForm({ slug: "true-trust", trusted: "true" }),
+    );
+    expect(res.status).toBe(201);
+    const obj = await headKey("true-trust");
+    expect(obj.customMetadata?.trusted).toBeUndefined();
+  });
+
+  it("update without trusted demotes a previously trusted page", async () => {
+    await postUpload(buildForm({ slug: "demote", trusted: "1" }));
+    let obj = await headKey("demote");
+    expect(obj.customMetadata?.trusted).toBe("1");
+
+    const res = await postUpload(buildForm({ slug: "demote", update: "1" }));
+    expect(res.status).toBe(200);
+    obj = await headKey("demote");
+    expect(obj.customMetadata?.trusted).toBeUndefined();
+  });
+
+  it("update with trusted=1 promotes a previously sandboxed page", async () => {
+    await postUpload(buildForm({ slug: "promote" }));
+    let obj = await headKey("promote");
+    expect(obj.customMetadata?.trusted).toBeUndefined();
+
+    const res = await postUpload(
+      buildForm({ slug: "promote", update: "1", trusted: "1" }),
+    );
+    expect(res.status).toBe(200);
+    obj = await headKey("promote");
+    expect(obj.customMetadata?.trusted).toBe("1");
   });
 });
 

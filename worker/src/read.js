@@ -1,22 +1,39 @@
 import { jsonResponse, notFound, TEXT_HTML } from "./http.js";
 import { checkAuth } from "./auth.js";
 
-// CSP for /p/{slug} pages. Permissive on script/style (because the whole
-// point is hand-authored inline JS + CSS) but locked to same-origin and
-// no plugin/form/base-uri trickery.
-const PAGE_CSP =
+// CSPs for /p/{slug}, picked per-object by `customMetadata.trusted`.
+// Sandboxed pages run in an opaque origin (no localStorage / cookies /
+// same-origin fetch). `allow-popups-to-escape-sandbox` prevents
+// target=_blank links from inheriting the sandbox onto their destination.
+const TRUSTED_PAGE_CSP =
   "default-src 'self'; img-src 'self' data: blob:; " +
   "style-src 'unsafe-inline'; script-src 'unsafe-inline'; " +
   "object-src 'none'; base-uri 'self'; form-action 'none'";
 
-const PAGE_HEADERS = {
+const SANDBOX_DIRECTIVE =
+  "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox " +
+  "allow-modals allow-top-navigation-by-user-activation";
+
+const SANDBOXED_PAGE_CSP = `${TRUSTED_PAGE_CSP}; ${SANDBOX_DIRECTIVE}`;
+
+const BASE_PAGE_HEADERS = {
   "Cache-Control": "public, max-age=3600",
   "X-Content-Type-Options": "nosniff",
   "Content-Type": TEXT_HTML,
-  "Content-Security-Policy": PAGE_CSP,
 };
 
+function pageHeaders(trusted) {
+  return {
+    ...BASE_PAGE_HEADERS,
+    "Content-Security-Policy": trusted ? TRUSTED_PAGE_CSP : SANDBOXED_PAGE_CSP,
+  };
+}
+
 const PAGE_KEY = (slug) => `${slug}/index.html`;
+
+function isTrusted(obj) {
+  return obj?.customMetadata?.trusted === "1";
+}
 
 export async function handleRead(slug, request, env) {
   const key = PAGE_KEY(slug);
@@ -26,11 +43,11 @@ export async function handleRead(slug, request, env) {
   if (request.method === "HEAD") {
     const head = await env.WWWSHARE_BUCKET.head(key);
     if (!head) return notFound();
-    return new Response(null, { headers: PAGE_HEADERS });
+    return new Response(null, { headers: pageHeaders(isTrusted(head)) });
   }
   const obj = await env.WWWSHARE_BUCKET.get(key);
   if (!obj) return notFound();
-  return new Response(obj.body, { headers: PAGE_HEADERS });
+  return new Response(obj.body, { headers: pageHeaders(isTrusted(obj)) });
 }
 
 export async function handleDelete(slug, request, env) {

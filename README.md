@@ -8,11 +8,13 @@ wwwshare ./talk.html my-talk
 #   https://wwwshare.example.com/p/my-talk
 ```
 
-That's it. The bytes go to R2 verbatim and are served back with an inline-script/style CSP — perfect for hand-authored documents with SVG diagrams, embedded styles, and inline JavaScript.
+That's it. The bytes go to R2 verbatim and are served back with an inline-script/style CSP — perfect for hand-authored documents with SVG diagrams, embedded styles, and inline JavaScript. 
+
+By default the page is loaded in a CSP `sandbox` so its scripts run but can't touch cookies or localStorage on the wwwshare origin; pass `--trust` to opt out.
 
 ## Why
 
-There are plenty of ways to host a static page, but most of them either require a build step, expect a folder, or strip the inline `<script>`/`<style>` that make a self-contained HTML doc actually self-contained. `wwwshare` accepts one file, gives you a short URL, and gets out of the way.
+There are plenty of ways to host a static page, but `wwwshare` accepts one file, gives you a short URL, and gets out of the way.
 
 It pairs naturally with tooling that produces single-file HTML — design mockups, generated reports, slides, one-off explainers.
 
@@ -27,7 +29,7 @@ The Worker has four endpoints:
 
 | Method | Path | Auth | Behavior |
 | --- | --- | --- | --- |
-| `POST` | `/upload` | Bearer | Multipart upload (`slug`, `html`, optional `update=1`). 201 create / 200 update / 409 conflict / 404 missing-for-update. |
+| `POST` | `/upload` | Bearer | Multipart upload (`slug`, `html`, optional `update=1`, optional `trusted=1`). 201 create / 200 update / 409 conflict / 404 missing-for-update. |
 | `GET` / `HEAD` | `/p/{slug}` | none | Serve the page with the `wwwshare` CSP. |
 | `DELETE` | `/p/{slug}` | Bearer | Remove the page. 204 on success, 404 if missing. |
 | `GET` | `/` | none | Tiny landing page. |
@@ -59,9 +61,9 @@ node cli/src/wwwshare.mjs ./some-file.html my-slug
 
 ## Deploying to Cloudflare
 
-Prereqs: a Cloudflare account with Workers + R2 enabled, and `npx wrangler login` already run.
+Prerequisites: a Cloudflare account with Workers + R2 enabled, and `npx wrangler login` already run.
 
-The whole prod setup is one shell block. It creates the bucket, deploys the Worker, generates a 256-bit random token, sets it both as a Worker secret and in your local CLI config — no copy-paste.
+The prod setup creates the bucket, deploys the Worker, generates a 256-bit random token, and sets it both as a Worker secret and in your local CLI config.
 
 ```sh
 cd worker
@@ -106,17 +108,20 @@ ln -s "$(pwd)/../cli/src/wwwshare.mjs" ~/bin/wwwshare   # from worker/
 ## Usage
 
 ```sh
-wwwshare <html-file> <slug>            # publish a new page
-wwwshare update <slug> <html-file>     # overwrite an existing page
-wwwshare remove <slug>                 # delete a page
+wwwshare <html-file> <slug>                  # publish a new page (sandboxed)
+wwwshare <html-file> <slug> --trust          # publish without the sandbox
+wwwshare update <slug> <html-file> [--trust] # overwrite an existing page
+wwwshare remove <slug>                       # delete a page
 ```
 
 On success the URL is printed and copied to the system clipboard (via `pbcopy` / `wl-copy` / `xclip`, in that order).
 
+`--trust` toggles per-upload: omitting it on an `update` demotes a previously trusted page back to sandboxed; passing it on `update` promotes a sandboxed page. The trust bit is stored as R2 `customMetadata` on the object.
+
 ### HTML constraints
 
 - **UTF-8.** Pages are served with `Content-Type: text/html; charset=utf-8`. Non-UTF-8 input is uploaded verbatim but will render with the wrong charset.
-- **Self-contained.** The default CSP is:
+- **Self-contained.** Both CSPs share the same script/style/img rules:
 
   ```
   default-src 'self'; img-src 'self' data: blob:;
@@ -132,15 +137,31 @@ On success the URL is printed and copied to the system clipboard (via `pbcopy` /
 
 This is a single-user tool. The threat model is "one person, one bearer token, public reads."
 
-**The upload token can do a lot.** A holder can:
+### Two trust levels per page
 
-- Publish arbitrary same-origin JavaScript at this Worker's URLs.
+Every uploaded page lands at one of two trust levels, chosen at upload time:
+
+- **Sandboxed (default).** The page is served with `sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-modals allow-top-navigation-by-user-activation` appended to the CSP. The browser gives the document an *opaque origin*, so:
+  - `localStorage`, `sessionStorage`, and `document.cookie` for the wwwshare origin are unavailable.
+  - Same-origin `fetch` back to the worker becomes cross-origin (and is still blocked by `default-src 'self'`).
+  - `<a>` clicks to external sites still navigate; `<a target="_blank">` still opens new tabs; `alert/confirm/prompt` still work.
+  - Scripts can't auto-redirect the tab (`window.location =` is blocked unless triggered by a user click).
+
+  Use this for HTML you don't fully trust — friends' vibecoded pages, generated reports from untrusted tools, anything you haven't audited line-by-line.
+
+- **Trusted (`--trust` flag).** The page runs in the real wwwshare origin. `localStorage`, cookies, and same-origin requests work normally. Use this when necessary for HTML you wrote or audited.
+
+### Trust model for the bearer token
+
+A token holder can:
+
+- Publish arbitrary same-origin JavaScript at this Worker's URLs (especially with `--trust`).
 - Read, overwrite, and delete any `/p/{slug}` page.
 - Build same-origin phishing UI or stage drive-by attacks against any other site you eventually host on the same origin.
 
 Practical implications:
 
-1. **Use a separate origin/subdomain from anything cookie-authenticated.** A dedicated subdomain (e.g. `pages.example.com`) keeps the script grant from leaking into your main site's cookie scope.
+1. **Use a separate origin/subdomain from anything cookie-authenticated.** A dedicated subdomain (e.g. `pages.example.com`) keeps the script grant from leaking into your main site's cookie scope. The sandbox default mitigates this for unaudited pages but a `--trust` upload still gets full same-origin powers.
 2. **Generate a strong token** (the snippet above gives ~256 bits) and rotate it if it ever leaks. To rotate, `wrangler secret put WWWSHARE_UPLOAD_TOKEN --config wrangler.prod.toml` again.
 3. **Reads are unauthenticated, "unlisted by obscurity."** Anyone who knows or guesses a slug can fetch the page. Short, human-readable slugs are easy to guess — use longer or less guessable slugs for anything you want to keep semi-private.
 

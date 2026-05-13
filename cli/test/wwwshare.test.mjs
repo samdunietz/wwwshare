@@ -34,11 +34,12 @@ const INVALID_SLUGS = [
 const HEAD = ["node", "wwwshare.mjs"];
 
 describe("parseArgs — create form (2 args)", () => {
-  it("returns action=create with file and slug", () => {
+  it("returns action=create with file and slug; trust=false by default", () => {
     expect(parseArgs([...HEAD, "./page.html", "my-page"])).toEqual({
       action: "create",
       slug: "my-page",
       file: "./page.html",
+      trust: false,
     });
   });
 
@@ -49,11 +50,12 @@ describe("parseArgs — create form (2 args)", () => {
 });
 
 describe("parseArgs — update form", () => {
-  it("returns action=update with slug and file", () => {
+  it("returns action=update with slug and file; trust=false by default", () => {
     expect(parseArgs([...HEAD, "update", "my-page", "./page.html"])).toEqual({
       action: "update",
       slug: "my-page",
       file: "./page.html",
+      trust: false,
     });
   });
 
@@ -88,6 +90,58 @@ describe("parseArgs — remove form", () => {
   });
 });
 
+describe("parseArgs — --trust flag", () => {
+  it("sets trust=true on create when --trust appears", () => {
+    expect(parseArgs([...HEAD, "./f.html", "abc", "--trust"])).toEqual({
+      action: "create",
+      slug: "abc",
+      file: "./f.html",
+      trust: true,
+    });
+  });
+
+  it("accepts --trust before positionals", () => {
+    expect(parseArgs([...HEAD, "--trust", "./f.html", "abc"])).toEqual({
+      action: "create",
+      slug: "abc",
+      file: "./f.html",
+      trust: true,
+    });
+  });
+
+  it("accepts --trust between positionals", () => {
+    expect(parseArgs([...HEAD, "./f.html", "--trust", "abc"])).toEqual({
+      action: "create",
+      slug: "abc",
+      file: "./f.html",
+      trust: true,
+    });
+  });
+
+  it("sets trust=true on update when --trust appears", () => {
+    expect(
+      parseArgs([...HEAD, "update", "abc", "./f.html", "--trust"]),
+    ).toEqual({
+      action: "update",
+      slug: "abc",
+      file: "./f.html",
+      trust: true,
+    });
+  });
+
+  it("rejects --trust on remove", () => {
+    expect(() => parseArgs([...HEAD, "remove", "abc", "--trust"])).toThrow(
+      /--trust is not valid with remove/,
+    );
+  });
+
+  it("rejects unknown --flags", () => {
+    expect(() => parseArgs([...HEAD, "./f.html", "abc", "--bogus"])).toThrow(
+      /unknown flag: --bogus/,
+    );
+  });
+});
+
 describe("parseArgs — slug parity (table-driven)", () => {
   for (const slug of VALID_SLUGS) {
     it(`accepts valid slug ${JSON.stringify(slug)} (create)`, () => {
@@ -95,6 +149,7 @@ describe("parseArgs — slug parity (table-driven)", () => {
         action: "create",
         slug,
         file: "./f.html",
+        trust: false,
       });
     });
     it(`accepts valid slug ${JSON.stringify(slug)} (update)`, () => {
@@ -102,6 +157,7 @@ describe("parseArgs — slug parity (table-driven)", () => {
         action: "update",
         slug,
         file: "./f.html",
+        trust: false,
       });
     });
     it(`accepts valid slug ${JSON.stringify(slug)} (remove)`, () => {
@@ -211,6 +267,37 @@ describe("uploadPage", () => {
     });
     const form = await readForm(fetchImpl.calls[0].init.body);
     expect(form.strings.update).toBe("1");
+  });
+
+  it("includes trusted=1 when trust is truthy", async () => {
+    const fetchImpl = makeFetchMock(
+      ok(201, { url: "https://x.example/p/abc", slug: "abc" }),
+    );
+    await uploadPage({
+      endpoint: "https://x.example",
+      token: "tok",
+      html: Buffer.from("<p>hi</p>"),
+      slug: "abc",
+      trust: true,
+      fetchImpl,
+    });
+    const form = await readForm(fetchImpl.calls[0].init.body);
+    expect(form.strings.trusted).toBe("1");
+  });
+
+  it("omits trusted when trust is falsy (default sandboxed)", async () => {
+    const fetchImpl = makeFetchMock(
+      ok(201, { url: "https://x.example/p/abc", slug: "abc" }),
+    );
+    await uploadPage({
+      endpoint: "https://x.example",
+      token: "tok",
+      html: Buffer.from("<p>hi</p>"),
+      slug: "abc",
+      fetchImpl,
+    });
+    const form = await readForm(fetchImpl.calls[0].init.body);
+    expect(form.strings.trusted).toBeUndefined();
   });
 
   it("round-trips arbitrary bytes (high-bit + null byte) without utf-8 mangling", async () => {

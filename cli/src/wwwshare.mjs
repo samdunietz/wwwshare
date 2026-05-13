@@ -19,10 +19,27 @@ const USAGE =
   "usage:\n" +
   "  wwwshare <html-file> <slug>            publish a new page\n" +
   "  wwwshare update <slug> <html-file>     overwrite an existing page\n" +
-  "  wwwshare remove <slug>                 delete a page";
+  "  wwwshare remove <slug>                 delete a page\n" +
+  "\n" +
+  "Flags (create / update):\n" +
+  "  --trust    skip the default CSP sandbox; grant the page same-origin\n" +
+  "             powers (localStorage, cookies, same-origin fetch).\n" +
+  "             Use only for HTML you wrote or audited.";
 
 export function parseArgs(argv) {
-  const args = argv.slice(2);
+  // Reject unknown --flags so a typo like `--trsut` fails loudly instead
+  // of falling through to positional parsing as a wrong-arity error.
+  let trust = false;
+  const args = [];
+  for (const arg of argv.slice(2)) {
+    if (arg === "--trust") {
+      trust = true;
+    } else if (arg.startsWith("--")) {
+      throw new Error(`unknown flag: ${arg}\n\n${USAGE}`);
+    } else {
+      args.push(arg);
+    }
+  }
   const verb = args[0];
 
   if (verb === "update") {
@@ -30,11 +47,14 @@ export function parseArgs(argv) {
     const slug = args[1];
     const file = args[2];
     requireSlug(slug);
-    return { action: "update", slug, file };
+    return { action: "update", slug, file, trust };
   }
 
   if (verb === "remove") {
     if (args.length !== 2) throw new Error(USAGE);
+    if (trust) {
+      throw new Error(`--trust is not valid with remove\n\n${USAGE}`);
+    }
     const slug = args[1];
     requireSlug(slug);
     return { action: "remove", slug };
@@ -43,7 +63,7 @@ export function parseArgs(argv) {
   if (args.length !== 2) throw new Error(USAGE);
   const [file, slug] = args;
   requireSlug(slug);
-  return { action: "create", slug, file };
+  return { action: "create", slug, file, trust };
 }
 
 function requireSlug(slug) {
@@ -60,6 +80,7 @@ export async function uploadPage({
   html,
   slug,
   update,
+  trust,
   fetchImpl = globalThis.fetch,
 }) {
   if (!endpoint) throw new Error("uploadPage: endpoint is required");
@@ -77,6 +98,7 @@ export async function uploadPage({
   // text/html; charset=utf-8 on the stored object.
   form.append("html", new Blob([html], { type: "text/html" }), "page.html");
   if (update) form.append("update", "1");
+  if (trust) form.append("trusted", "1");
 
   const url = new URL("/upload", endpoint).toString();
   // No Content-Type — fetch derives the multipart boundary from FormData.
@@ -235,6 +257,7 @@ async function main() {
     html,
     slug: parsed.slug,
     update: parsed.action === "update",
+    trust: parsed.trust,
   });
 
   // Sanity check: catch a server that silently ignores the slug field.
@@ -247,8 +270,9 @@ async function main() {
 
   const copied = await copyToClipboard(url);
   const verb = parsed.action === "update" ? "Updated" : "Published";
+  const trustNote = parsed.trust ? " (trusted, no sandbox)" : "";
   process.stdout.write(
-    `✓ ${verb} "${parsed.slug}"\n  ${url}\n` +
+    `✓ ${verb} "${parsed.slug}"${trustNote}\n  ${url}\n` +
       (copied ? "  (copied to clipboard)\n" : ""),
   );
 }
