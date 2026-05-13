@@ -1,0 +1,13 @@
+name = "wwwshare"
+main = "src/index.js"
+compatibility_date = "2026-05-13"
+
+[[r2_buckets]]
+binding = "WWWSHARE_BUCKET"
+bucket_name = "wwwshare-content-dev"
+
+# WWWSHARE_UPLOAD_TOKEN is NOT tracked here — committing it would turn auth
+# into a known credential. Local dev reads it from worker/.dev.vars
+# (gitignored). Tests inject it via miniflare bindings in
+# worker/vitest.config.mjs.
+# Production: `wrangler secret put WWWSHARE_UPLOAD_TOKEN` from worker/.
