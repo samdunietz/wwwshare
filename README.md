@@ -99,13 +99,40 @@ echo "✓ Deployed to $DEPLOY_URL"
 echo "✓ CLI config at ~/.config/wwwshare/.env (mode 0600)"
 ```
 
-To rotate the token later, re-run the `TOKEN=…` line through the `~/.config/wwwshare/.env` write.
+To rotate the token later, re-run the `TOKEN=…` line through the `~/.config/wwwshare/.env` write. Re-running the whole block above also rotates the token — silently invalidating every other machine that still holds the old one.
 
 ### Install the CLI on your PATH
 
 ```sh
 ln -s "$(pwd)/../cli/src/wwwshare.mjs" ~/bin/wwwshare   # from worker/
 # or: ln -s "$PWD/cli/src/wwwshare.mjs" ~/bin/wwwshare   # from repo root
+```
+
+## Using the CLI from another machine
+
+If you've already deployed and just want to publish from a new box, **don't** re-run the deploy block above — it mints a fresh token and silently invalidates the existing one. Instead, get the CLI source on disk and recreate the config:
+
+```sh
+git clone https://github.com/samdunietz/wwwshare.git
+cd wwwshare
+npm install
+```
+
+Copy `WWWSHARE_ENDPOINT` and `WWWSHARE_UPLOAD_TOKEN` from `~/.config/wwwshare/.env` on the original machine, then on the new machine:
+
+```sh
+mkdir -p ~/.config/wwwshare
+( umask 077 && cat > ~/.config/wwwshare/.env <<EOF
+WWWSHARE_ENDPOINT=https://wwwshare.<your-subdomain>.workers.dev
+WWWSHARE_UPLOAD_TOKEN=<your-token>
+EOF
+)
+```
+
+Then symlink onto PATH:
+
+```sh
+ln -s "$PWD/cli/src/wwwshare.mjs" ~/bin/wwwshare
 ```
 
 ## Usage
