@@ -24,16 +24,20 @@ const USAGE =
   "Flags (create / update):\n" +
   "  --trust    skip the default CSP sandbox; grant the page same-origin\n" +
   "             powers (localStorage, cookies, same-origin fetch).\n" +
-  "             Use only for HTML you wrote or audited.";
+  "             Use only for HTML you wrote or audited.\n" +
+  "  --no-cp    don't copy the published URL to the system clipboard.";
 
 export function parseArgs(argv) {
   // Reject unknown --flags so a typo like `--trsut` fails loudly instead
   // of falling through to positional parsing as a wrong-arity error.
   let trust = false;
+  let noCp = false;
   const args = [];
   for (const arg of argv.slice(2)) {
     if (arg === "--trust") {
       trust = true;
+    } else if (arg === "--no-cp") {
+      noCp = true;
     } else if (arg.startsWith("--")) {
       throw new Error(`unknown flag: ${arg}\n\n${USAGE}`);
     } else {
@@ -47,13 +51,16 @@ export function parseArgs(argv) {
     const slug = args[1];
     const file = args[2];
     requireSlug(slug);
-    return { action: "update", slug, file, trust };
+    return { action: "update", slug, file, trust, noCp };
   }
 
   if (verb === "remove") {
     if (args.length !== 2) throw new Error(USAGE);
     if (trust) {
       throw new Error(`--trust is not valid with remove\n\n${USAGE}`);
+    }
+    if (noCp) {
+      throw new Error(`--no-cp is not valid with remove\n\n${USAGE}`);
     }
     const slug = args[1];
     requireSlug(slug);
@@ -63,7 +70,7 @@ export function parseArgs(argv) {
   if (args.length !== 2) throw new Error(USAGE);
   const [file, slug] = args;
   requireSlug(slug);
-  return { action: "create", slug, file, trust };
+  return { action: "create", slug, file, trust, noCp };
 }
 
 function requireSlug(slug) {
@@ -268,7 +275,7 @@ async function main() {
     );
   }
 
-  const copied = await copyToClipboard(url);
+  const copied = !parsed.noCp && (await copyToClipboard(url));
   const verb = parsed.action === "update" ? "Updated" : "Published";
   const trustNote = parsed.trust ? " (trusted, no sandbox)" : "";
   process.stdout.write(

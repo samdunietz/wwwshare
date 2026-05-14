@@ -40,6 +40,7 @@ describe("parseArgs — create form (2 args)", () => {
       slug: "my-page",
       file: "./page.html",
       trust: false,
+      noCp: false,
     });
   });
 
@@ -56,6 +57,7 @@ describe("parseArgs — update form", () => {
       slug: "my-page",
       file: "./page.html",
       trust: false,
+      noCp: false,
     });
   });
 
@@ -97,6 +99,7 @@ describe("parseArgs — --trust flag", () => {
       slug: "abc",
       file: "./f.html",
       trust: true,
+      noCp: false,
     });
   });
 
@@ -106,6 +109,7 @@ describe("parseArgs — --trust flag", () => {
       slug: "abc",
       file: "./f.html",
       trust: true,
+      noCp: false,
     });
   });
 
@@ -115,6 +119,7 @@ describe("parseArgs — --trust flag", () => {
       slug: "abc",
       file: "./f.html",
       trust: true,
+      noCp: false,
     });
   });
 
@@ -126,6 +131,7 @@ describe("parseArgs — --trust flag", () => {
       slug: "abc",
       file: "./f.html",
       trust: true,
+      noCp: false,
     });
   });
 
@@ -142,6 +148,58 @@ describe("parseArgs — --trust flag", () => {
   });
 });
 
+describe("parseArgs — --no-cp flag", () => {
+  it("sets noCp=true on create when --no-cp appears", () => {
+    expect(parseArgs([...HEAD, "./f.html", "abc", "--no-cp"])).toEqual({
+      action: "create",
+      slug: "abc",
+      file: "./f.html",
+      trust: false,
+      noCp: true,
+    });
+  });
+
+  it("sets noCp=true on update when --no-cp appears", () => {
+    expect(
+      parseArgs([...HEAD, "update", "abc", "./f.html", "--no-cp"]),
+    ).toEqual({
+      action: "update",
+      slug: "abc",
+      file: "./f.html",
+      trust: false,
+      noCp: true,
+    });
+  });
+
+  it("accepts --no-cp before positionals", () => {
+    expect(parseArgs([...HEAD, "--no-cp", "./f.html", "abc"])).toEqual({
+      action: "create",
+      slug: "abc",
+      file: "./f.html",
+      trust: false,
+      noCp: true,
+    });
+  });
+
+  it("combines with --trust on create", () => {
+    expect(
+      parseArgs([...HEAD, "./f.html", "abc", "--trust", "--no-cp"]),
+    ).toEqual({
+      action: "create",
+      slug: "abc",
+      file: "./f.html",
+      trust: true,
+      noCp: true,
+    });
+  });
+
+  it("rejects --no-cp on remove", () => {
+    expect(() => parseArgs([...HEAD, "remove", "abc", "--no-cp"])).toThrow(
+      /--no-cp is not valid with remove/,
+    );
+  });
+});
+
 describe("parseArgs — slug parity (table-driven)", () => {
   for (const slug of VALID_SLUGS) {
     it(`accepts valid slug ${JSON.stringify(slug)} (create)`, () => {
@@ -150,6 +208,7 @@ describe("parseArgs — slug parity (table-driven)", () => {
         slug,
         file: "./f.html",
         trust: false,
+        noCp: false,
       });
     });
     it(`accepts valid slug ${JSON.stringify(slug)} (update)`, () => {
@@ -158,6 +217,7 @@ describe("parseArgs — slug parity (table-driven)", () => {
         slug,
         file: "./f.html",
         trust: false,
+        noCp: false,
       });
     });
     it(`accepts valid slug ${JSON.stringify(slug)} (remove)`, () => {

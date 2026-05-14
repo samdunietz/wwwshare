@@ -38,6 +38,8 @@ Slugs match `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` (1–64 chars, lowercase + 
 
 ## Install and local development
 
+This script is intended for macOS and Linux.
+
 Intall `npm` and `node` if not already. Then:
 
 ```sh
@@ -114,7 +116,7 @@ wwwshare update <slug> <html-file> [--trust] # overwrite an existing page
 wwwshare remove <slug>                       # delete a page
 ```
 
-On success the URL is printed and copied to the system clipboard (via `pbcopy` / `wl-copy` / `xclip`, in that order).
+On success the URL is printed. The URL is also copied to the system clipboard unless the --no-cp flag is added.
 
 `--trust` toggles per-upload: omitting it on an `update` demotes a previously trusted page back to sandboxed; passing it on `update` promotes a sandboxed page. The trust bit is stored as R2 `customMetadata` on the object.
 
