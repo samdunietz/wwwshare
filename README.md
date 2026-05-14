@@ -40,7 +40,7 @@ Slugs match `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` (1–64 chars, lowercase + 
 
 This script is intended for macOS and Linux.
 
-Intall `npm` and `node` if not already. Then:
+Install `npm` and `node` if not already. Then:
 
 ```sh
 git clone https://github.com/samdunietz/wwwshare.git
@@ -49,10 +49,15 @@ npm install
 echo "WWWSHARE_UPLOAD_TOKEN=devtoken" > worker/.dev.vars
 ```
 
-`worker/.dev.vars` is gitignored. Then:
+`worker/.dev.vars` is gitignored. Verify the local setup:
 
 ```sh
 npm test
+```
+
+Then start the dev server:
+
+```sh
 npm run dev
 ```
 
@@ -63,6 +68,14 @@ npm run publish:dev -- ./some-file.html my-slug
 ```
 
 `publish:dev` sets `WWWSHARE_ENDPOINT=http://localhost:8787` and `WWWSHARE_UPLOAD_TOKEN=devtoken` for the one invocation, so it doesn't bleed into the installed `wwwshare` reading `~/.config/wwwshare/.env`.
+
+## Install the CLI
+
+```sh
+cd cli && npm link
+```
+
+This drops a `wwwshare` symlink into npm's global bin directory, which is already on `$PATH` if Node was installed normally.
 
 ## Deploying to Cloudflare
 
@@ -83,30 +96,44 @@ npx wrangler r2 bucket create wwwshare-content
 # upload until the secret is in place.
 DEPLOY_OUT=$(npx wrangler deploy --config wrangler.prod.toml 2>&1 | tee /dev/tty)
 DEPLOY_URL=$(printf '%s\n' "$DEPLOY_OUT" | grep -oE 'https://[a-z0-9.-]+\.workers\.dev' | head -1)
+if [ -z "$DEPLOY_URL" ]; then
+  echo "❌ Could not find a workers.dev URL in the deploy output above. Skipping token generation — re-check the output and re-run this block." >&2
+else
+  # Generate token, set as Worker secret, write local CLI config.
+  TOKEN=$(node -e 'console.log(require("crypto").randomBytes(32).toString("base64url"))')
+  printf '%s' "$TOKEN" | npx wrangler secret put WWWSHARE_UPLOAD_TOKEN --config wrangler.prod.toml
 
-# Generate token, set as Worker secret, write local CLI config.
-TOKEN=$(node -e 'console.log(require("crypto").randomBytes(32).toString("base64url"))')
-printf '%s' "$TOKEN" | npx wrangler secret put WWWSHARE_UPLOAD_TOKEN --config wrangler.prod.toml
-
-mkdir -p ~/.config/wwwshare
-( umask 077 && cat > ~/.config/wwwshare/.env <<EOF
+  mkdir -p ~/.config/wwwshare
+  ( umask 077 && cat > ~/.config/wwwshare/.env <<EOF
 WWWSHARE_ENDPOINT=$DEPLOY_URL
 WWWSHARE_UPLOAD_TOKEN=$TOKEN
 EOF
-)
+  )
 
-echo "✓ Deployed to $DEPLOY_URL"
-echo "✓ CLI config at ~/.config/wwwshare/.env (mode 0600)"
+  echo "✓ Deployed to $DEPLOY_URL"
+  echo "✓ CLI config at ~/.config/wwwshare/.env (mode 0600)"
+fi
 ```
 
-To rotate the token later, re-run the `TOKEN=…` line through the `~/.config/wwwshare/.env` write. Re-running the whole block above also rotates the token — silently invalidating every other machine that still holds the old one.
-
-### Install the CLI on your PATH
+To rotate the token (e.g. if it leaks), from the repo root:
 
 ```sh
-ln -s "$(pwd)/../cli/src/wwwshare.mjs" ~/bin/wwwshare   # from worker/
-# or: ln -s "$PWD/cli/src/wwwshare.mjs" ~/bin/wwwshare   # from repo root
+cd worker
+. ~/.config/wwwshare/.env  # preserve the existing endpoint
+
+NEW_TOKEN=$(node -e 'console.log(require("crypto").randomBytes(32).toString("base64url"))')
+printf '%s' "$NEW_TOKEN" | npx wrangler secret put WWWSHARE_UPLOAD_TOKEN --config wrangler.prod.toml
+
+( umask 077 && cat > ~/.config/wwwshare/.env <<EOF
+WWWSHARE_ENDPOINT=$WWWSHARE_ENDPOINT
+WWWSHARE_UPLOAD_TOKEN=$NEW_TOKEN
+EOF
+)
+
+echo "✓ New token: $NEW_TOKEN — copy to any other machines using this deploy."
 ```
+
+This invalidates every other machine still holding the old token; push the new one to them too.
 
 ## Using the CLI from another machine
 
@@ -118,7 +145,7 @@ cd wwwshare
 npm install
 ```
 
-Copy `WWWSHARE_ENDPOINT` and `WWWSHARE_UPLOAD_TOKEN` from `~/.config/wwwshare/.env` on the original machine, then on the new machine:
+On the new machine, recreate `~/.config/wwwshare/.env` with values from the original (replace `<your-subdomain>` and `<your-token>`):
 
 ```sh
 mkdir -p ~/.config/wwwshare
@@ -129,10 +156,10 @@ EOF
 )
 ```
 
-Then symlink onto PATH:
+Then put the CLI on your PATH:
 
 ```sh
-ln -s "$PWD/cli/src/wwwshare.mjs" ~/bin/wwwshare
+cd cli && npm link
 ```
 
 ## Usage
@@ -192,7 +219,7 @@ A token holder can:
 Practical implications:
 
 1. **Use a separate origin/subdomain from anything cookie-authenticated.** A dedicated subdomain (e.g. `pages.example.com`) keeps the script grant from leaking into your main site's cookie scope. The sandbox default mitigates this for unaudited pages but a `--trust` upload still gets full same-origin powers. To set up a custom domain, bind a route in the Cloudflare dashboard and update `WWWSHARE_ENDPOINT` in `~/.config/wwwshare/.env`.
-2. **Generate a strong token** (the snippet above gives ~256 bits) and rotate it if it ever leaks. To rotate, `wrangler secret put WWWSHARE_UPLOAD_TOKEN --config wrangler.prod.toml` again.
+2. **Generate a strong token** (the snippet above gives ~256 bits) and rotate it if it ever leaks — see the rotation recipe under [Deploying to Cloudflare](#deploying-to-cloudflare).
 3. **Reads are unauthenticated, "unlisted by obscurity."** Anyone who knows or guesses a slug can fetch the page. Short, human-readable slugs are easy to guess — use longer or less guessable slugs for anything you want to keep semi-private.
 
 For more on the trust boundary, see comments in `worker/src/upload.js` and `worker/src/read.js`.
@@ -205,4 +232,4 @@ WWWSHARE_BUCKET/
     └── index.html
 ```
 
-Upload writes a single R2 object atomically. Readers either see the page or 404 — no partial states. (Concurrent writers can still last-write-win on the same slug; for single-user CLI use that's fine.)
+Upload writes a single R2 object atomically. (If concurrent writers, last-write-wins on the same slug.)
