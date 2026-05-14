@@ -4,6 +4,7 @@ import {
   parseArgs,
   uploadPage,
   deletePage,
+  listPages,
 } from "../src/wwwshare.mjs";
 
 // Slug-parity fixture — must agree with worker/test/upload.test.js. If
@@ -88,6 +89,28 @@ describe("parseArgs — remove form", () => {
   it("throws usage on extra args", () => {
     expect(() => parseArgs([...HEAD, "remove", "my-page", "extra"])).toThrow(
       /usage:/,
+    );
+  });
+});
+
+describe("parseArgs — list form", () => {
+  it("returns action=list with no other fields", () => {
+    expect(parseArgs([...HEAD, "list"])).toEqual({ action: "list" });
+  });
+
+  it("throws usage on extra positional", () => {
+    expect(() => parseArgs([...HEAD, "list", "extra"])).toThrow(/usage:/);
+  });
+
+  it("rejects --trust on list", () => {
+    expect(() => parseArgs([...HEAD, "list", "--trust"])).toThrow(
+      /--trust is not valid with list/,
+    );
+  });
+
+  it("rejects --no-cp on list", () => {
+    expect(() => parseArgs([...HEAD, "list", "--no-cp"])).toThrow(
+      /--no-cp is not valid with list/,
     );
   });
 });
@@ -450,5 +473,73 @@ describe("deletePage", () => {
         fetchImpl,
       }),
     ).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+describe("listPages", () => {
+  it("GETs /list with Authorization and returns the slugs array", async () => {
+    const fetchImpl = makeFetchMock(ok(200, { slugs: ["a", "b", "c"] }));
+    const result = await listPages({
+      endpoint: "https://x.example",
+      token: "tok",
+      fetchImpl,
+    });
+    expect(result).toEqual(["a", "b", "c"]);
+
+    expect(fetchImpl.calls).toHaveLength(1);
+    const { url, init } = fetchImpl.calls[0];
+    expect(url).toBe("https://x.example/list");
+    expect(init.method).toBe("GET");
+    expect(init.headers.Authorization).toBe("Bearer tok");
+  });
+
+  it("returns an empty array when the server returns {slugs: []}", async () => {
+    const fetchImpl = makeFetchMock(ok(200, { slugs: [] }));
+    const result = await listPages({
+      endpoint: "https://x.example",
+      token: "tok",
+      fetchImpl,
+    });
+    expect(result).toEqual([]);
+  });
+
+  it("on 401: throws Error with status 401", async () => {
+    const fetchImpl = makeFetchMock(
+      err(401, "Unauthorized", { error: "unauthorized" }),
+    );
+    await expect(
+      listPages({
+        endpoint: "https://x.example",
+        token: "tok",
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({ status: 401 });
+  });
+
+  it("on 500: throws Error with status and detail", async () => {
+    const fetchImpl = makeFetchMock(
+      err(500, "Internal Server Error", { error: "boom" }),
+    );
+    await expect(
+      listPages({
+        endpoint: "https://x.example",
+        token: "tok",
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      status: 500,
+      message: expect.stringContaining("boom"),
+    });
+  });
+
+  it("throws on malformed response (missing slugs array)", async () => {
+    const fetchImpl = makeFetchMock(ok(200, { not: "slugs" }));
+    await expect(
+      listPages({
+        endpoint: "https://x.example",
+        token: "tok",
+        fetchImpl,
+      }),
+    ).rejects.toThrow(/malformed response/);
   });
 });

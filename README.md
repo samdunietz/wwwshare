@@ -23,15 +23,16 @@ It pairs naturally with tooling that produces single-file HTML — design mockup
 This is a Cloudflare Workers app with two npm workspaces:
 
 - `worker/` — the Cloudflare Worker (HTTP + R2). No bundler.
-- `cli/` — the `wwwshare` Node CLI that uploads via `POST /upload`.
+- `cli/` — the `wwwshare` Node CLI that talks to the Worker over the HTTP API.
 
-The Worker has four endpoints:
+The Worker has five endpoints:
 
 | Method | Path | Auth | Behavior |
 | --- | --- | --- | --- |
 | `POST` | `/upload` | Bearer | Multipart upload (`slug`, `html`, optional `update=1`, optional `trusted=1`). 201 create / 200 update / 409 conflict / 404 missing-for-update. |
 | `GET` / `HEAD` | `/p/{slug}` | none | Serve the page with the `wwwshare` CSP. |
 | `DELETE` | `/p/{slug}` | Bearer | Remove the page. 204 on success, 404 if missing. |
+| `GET` | `/list` | Bearer | Return `{slugs: [...]}` sorted ascending. |
 | `GET` | `/` | none | Tiny landing page. |
 
 Slugs match `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` (1–64 chars, lowercase + digits + dash, no leading/trailing dash).
@@ -168,9 +169,10 @@ wwwshare <html-file> <slug>                  # publish a new page (sandboxed)
 wwwshare <html-file> <slug> --trust          # publish without the sandbox
 wwwshare update <slug> <html-file> [--trust] # overwrite an existing page
 wwwshare remove <slug>                       # delete a page
+wwwshare list                                # list every live slug, one per line
 ```
 
-On success the URL is printed. The URL is also copied to the system clipboard unless the --no-cp flag is added.
+On a successful publish / update / remove the URL is printed (and copied to the system clipboard unless `--no-cp` is added). `list` prints one bare slug per line; pipe it into `xargs` or `grep` as you would any line-oriented tool. To download a page, hit `/p/{slug}` directly — e.g. `wget "$WWWSHARE_ENDPOINT/p/<slug>"`.
 
 `--trust` toggles per-upload: omitting it on an `update` demotes a previously trusted page back to sandboxed; passing it on `update` promotes a sandboxed page. The trust bit is stored as R2 `customMetadata` on the object.
 
@@ -213,13 +215,14 @@ A token holder can:
 
 - Publish arbitrary same-origin JavaScript at this Worker's URLs (especially with `--trust`).
 - Read, overwrite, and delete any `/p/{slug}` page.
+- Enumerate every live slug via `GET /list`.
 - Build same-origin phishing UI or stage drive-by attacks against any other site you eventually host on the same origin.
 
 Practical implications:
 
 1. **Use a separate origin/subdomain from anything cookie-authenticated.** A dedicated subdomain (e.g. `pages.example.com`) keeps the script grant from leaking into your main site's cookie scope. The sandbox default mitigates this for unaudited pages but a `--trust` upload still gets full same-origin powers. To set up a custom domain, bind a route in the Cloudflare dashboard and update `WWWSHARE_ENDPOINT` in `~/.config/wwwshare/.env`.
 2. **Generate a strong token** (the snippet above gives ~256 bits) and rotate it if it ever leaks — see the rotation recipe under [Deploying to Cloudflare](#deploying-to-cloudflare).
-3. **Reads are unauthenticated, "unlisted by obscurity."** Anyone who knows or guesses a slug can fetch the page. Short, human-readable slugs are easy to guess — use longer or less guessable slugs for anything you want to keep semi-private.
+3. **Reads are unauthenticated.** Anyone who knows or guesses a slug can fetch the page. Short, human-readable slugs are easy to guess — use longer or less guessable slugs for anything you want to keep semi-private. `/list` is bearer-gated, because enumerating every live slug is a stronger power than fetching any one.
 
 For more on the trust boundary, see comments in `worker/src/upload.js` and `worker/src/read.js`.
 

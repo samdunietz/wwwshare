@@ -20,6 +20,7 @@ const USAGE =
   "  wwwshare <html-file> <slug>            publish a new page\n" +
   "  wwwshare update <slug> <html-file>     overwrite an existing page\n" +
   "  wwwshare remove <slug>                 delete a page\n" +
+  "  wwwshare list                          list every live slug, one per line\n" +
   "\n" +
   "Flags (create / update):\n" +
   "  --trust    skip the default CSP sandbox; grant the page same-origin\n" +
@@ -65,6 +66,17 @@ export function parseArgs(argv) {
     const slug = args[1];
     requireSlug(slug);
     return { action: "remove", slug };
+  }
+
+  if (verb === "list") {
+    if (args.length !== 1) throw new Error(USAGE);
+    if (trust) {
+      throw new Error(`--trust is not valid with list\n\n${USAGE}`);
+    }
+    if (noCp) {
+      throw new Error(`--no-cp is not valid with list\n\n${USAGE}`);
+    }
+    return { action: "list" };
   }
 
   if (args.length !== 2) throw new Error(USAGE);
@@ -121,6 +133,33 @@ export async function uploadPage({
 
   const body = await response.json();
   return { url: body.url, slug: body.slug };
+}
+
+export async function listPages({
+  endpoint,
+  token,
+  fetchImpl = globalThis.fetch,
+}) {
+  if (!endpoint) throw new Error("listPages: endpoint is required");
+  if (!token) throw new Error("listPages: token is required");
+
+  const url = new URL("/list", endpoint).toString();
+  const response = await fetchImpl(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    throw await buildHttpError(response, "List failed");
+  }
+
+  const body = await response.json();
+  if (!Array.isArray(body.slugs)) {
+    throw new Error(
+      "List failed: malformed response — check WWWSHARE_ENDPOINT and worker version",
+    );
+  }
+  return body.slugs;
 }
 
 export async function deletePage({
@@ -242,6 +281,14 @@ async function main() {
   if (parsed.action === "remove") {
     const { url } = await deletePage({ endpoint, token, slug: parsed.slug });
     process.stdout.write(`✓ Removed "${parsed.slug}"\n  ${url}\n`);
+    return;
+  }
+
+  if (parsed.action === "list") {
+    const slugs = await listPages({ endpoint, token });
+    if (slugs.length > 0) {
+      process.stdout.write(slugs.join("\n") + "\n");
+    }
     return;
   }
 

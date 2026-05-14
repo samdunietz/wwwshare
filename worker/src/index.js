@@ -1,5 +1,6 @@
 import { handleUpload } from "./upload.js";
 import { handleRead, handleDelete } from "./read.js";
+import { handleList } from "./list.js";
 import { SLUG_PATTERN } from "./slug.js";
 import { methodNotAllowed, notFound, TEXT_HTML } from "./http.js";
 
@@ -22,6 +23,7 @@ const LANDING_HTML = `<!doctype html>
 const PAGE_ROUTE_RE = new RegExp(`^/p/(${SLUG_PATTERN})$`);
 const READ_METHODS = ["GET", "HEAD"];
 const UPLOAD_METHODS = ["POST"];
+const LIST_METHODS = ["GET"];
 const PAGE_METHODS = ["GET", "HEAD", "DELETE"];
 
 export default {
@@ -42,6 +44,11 @@ export default {
       if (!UPLOAD_METHODS.includes(method))
         return methodNotAllowed(UPLOAD_METHODS);
       return handleUpload(request, env);
+    }
+
+    if (path === "/list") {
+      if (!LIST_METHODS.includes(method)) return methodNotAllowed(LIST_METHODS);
+      return handleList(request, env);
     }
 
     // Malformed /p/ paths (e.g. /p/Bad-Slug) miss the regex and fall
