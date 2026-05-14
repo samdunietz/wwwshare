@@ -5,6 +5,7 @@ import {
   uploadPage,
   deletePage,
   listPages,
+  removeMany,
 } from "../src/wwwshare.mjs";
 
 // Slug-parity fixture — must agree with worker/test/upload.test.js. If
@@ -75,10 +76,17 @@ describe("parseArgs — update form", () => {
 });
 
 describe("parseArgs — remove form", () => {
-  it("returns action=remove with slug", () => {
+  it("returns action=remove with a single-slug array", () => {
     expect(parseArgs([...HEAD, "remove", "my-page"])).toEqual({
       action: "remove",
-      slug: "my-page",
+      slugs: ["my-page"],
+    });
+  });
+
+  it("returns action=remove with all positional slugs in input order", () => {
+    expect(parseArgs([...HEAD, "remove", "a", "b", "c"])).toEqual({
+      action: "remove",
+      slugs: ["a", "b", "c"],
     });
   });
 
@@ -86,10 +94,10 @@ describe("parseArgs — remove form", () => {
     expect(() => parseArgs([...HEAD, "remove"])).toThrow(/usage:/);
   });
 
-  it("throws usage on extra args", () => {
-    expect(() => parseArgs([...HEAD, "remove", "my-page", "extra"])).toThrow(
-      /usage:/,
-    );
+  it("rejects an invalid slug anywhere in the list before any network call", () => {
+    expect(() =>
+      parseArgs([...HEAD, "remove", "good", "BAD_SLUG", "also-good"]),
+    ).toThrow(/invalid slug format/);
   });
 });
 
@@ -246,7 +254,7 @@ describe("parseArgs — slug parity (table-driven)", () => {
     it(`accepts valid slug ${JSON.stringify(slug)} (remove)`, () => {
       expect(parseArgs([...HEAD, "remove", slug])).toEqual({
         action: "remove",
-        slug,
+        slugs: [slug],
       });
     });
   }
@@ -297,6 +305,14 @@ function ok(status, body) {
     text: async () => JSON.stringify(body),
   };
 }
+
+const NO_CONTENT = {
+  ok: true,
+  status: 204,
+  statusText: "No Content",
+  text: async () => "",
+  json: async () => ({}),
+};
 
 function err(status, statusText, body) {
   return {
@@ -423,13 +439,7 @@ describe("uploadPage", () => {
 
 describe("deletePage", () => {
   it("DELETEs /p/{slug} with Authorization on 204 success", async () => {
-    const fetchImpl = makeFetchMock({
-      ok: true,
-      status: 204,
-      statusText: "No Content",
-      text: async () => "",
-      json: async () => ({}),
-    });
+    const fetchImpl = makeFetchMock(NO_CONTENT);
     const result = await deletePage({
       endpoint: "https://x.example",
       token: "tok",
@@ -473,6 +483,137 @@ describe("deletePage", () => {
         fetchImpl,
       }),
     ).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+describe("removeMany", () => {
+  // Per-call response queue — different from makeFetchMock, which returns the
+  // same response forever. Throwing when exhausted catches "called more times
+  // than expected" bugs (e.g. failing to bail on 401).
+  function makeFetchQueue(responses) {
+    const calls = [];
+    const fn = async (url, init) => {
+      calls.push({ url, init });
+      if (responses.length === 0) {
+        throw new Error("fetch called more times than responses queued");
+      }
+      const next = responses.shift();
+      if (next instanceof Error) throw next;
+      return next;
+    };
+    fn.calls = calls;
+    return fn;
+  }
+
+  function buf() {
+    const chunks = [];
+    return {
+      chunks,
+      write: (s) => {
+        chunks.push(s);
+      },
+    };
+  }
+
+  it("removes every slug in input order on all-204; failures=0", async () => {
+    const fetchImpl = makeFetchQueue([NO_CONTENT, NO_CONTENT, NO_CONTENT]);
+    const stdout = buf();
+    const stderr = buf();
+    const result = await removeMany({
+      endpoint: "https://x.example",
+      token: "tok",
+      slugs: ["a", "b", "c"],
+      fetchImpl,
+      stdout,
+      stderr,
+    });
+    expect(result).toEqual({ failures: 0 });
+    expect(fetchImpl.calls.map((c) => c.url)).toEqual([
+      "https://x.example/p/a",
+      "https://x.example/p/b",
+      "https://x.example/p/c",
+    ]);
+    expect(stdout.chunks.join("")).toBe(
+      `✓ Removed "a"\n  https://x.example/p/a\n` +
+        `✓ Removed "b"\n  https://x.example/p/b\n` +
+        `✓ Removed "c"\n  https://x.example/p/c\n`,
+    );
+    expect(stderr.chunks.join("")).toBe("");
+  });
+
+  it("continues past a mid-list 404; reports failures=1 and still attempts every slug", async () => {
+    const fetchImpl = makeFetchQueue([
+      NO_CONTENT,
+      err(404, "Not Found", { error: "not found" }),
+      NO_CONTENT,
+    ]);
+    const stdout = buf();
+    const stderr = buf();
+    const result = await removeMany({
+      endpoint: "https://x.example",
+      token: "tok",
+      slugs: ["a", "b", "c"],
+      fetchImpl,
+      stdout,
+      stderr,
+    });
+    expect(result).toEqual({ failures: 1 });
+    expect(fetchImpl.calls).toHaveLength(3);
+    expect(stdout.chunks.join("")).toBe(
+      `✓ Removed "a"\n  https://x.example/p/a\n` +
+        `✓ Removed "c"\n  https://x.example/p/c\n`,
+    );
+    expect(stderr.chunks.join("")).toMatch(
+      /✗ Remove failed: no page at slug b/,
+    );
+  });
+
+  it("bails on 401: stops processing, prints token hint, never attempts later slugs", async () => {
+    const fetchImpl = makeFetchQueue([
+      NO_CONTENT,
+      err(401, "Unauthorized", { error: "unauthorized" }),
+      // c's response is intentionally absent — if removeMany doesn't bail,
+      // the queue will throw and the test will fail with a clear message.
+    ]);
+    const stdout = buf();
+    const stderr = buf();
+    const result = await removeMany({
+      endpoint: "https://x.example",
+      token: "tok",
+      slugs: ["a", "b", "c"],
+      fetchImpl,
+      stdout,
+      stderr,
+    });
+    expect(result).toEqual({ failures: 1 });
+    expect(fetchImpl.calls).toHaveLength(2);
+    expect(stdout.chunks.join("")).toBe(
+      `✓ Removed "a"\n  https://x.example/p/a\n`,
+    );
+    const errText = stderr.chunks.join("");
+    expect(errText).toMatch(/✗ Remove failed: 401/);
+    expect(errText).toMatch(/  Check WWWSHARE_UPLOAD_TOKEN/);
+  });
+
+  it("propagates non-HTTP errors (no .status) instead of swallowing them per-slug", async () => {
+    const fetchImpl = makeFetchQueue([
+      new Error("fetch failed"),
+      // b's response is intentionally absent.
+    ]);
+    const stdout = buf();
+    const stderr = buf();
+    await expect(
+      removeMany({
+        endpoint: "https://x.example",
+        token: "tok",
+        slugs: ["a", "b"],
+        fetchImpl,
+        stdout,
+        stderr,
+      }),
+    ).rejects.toThrow(/fetch failed/);
+    expect(fetchImpl.calls).toHaveLength(1);
+    expect(stderr.chunks.join("")).toBe("");
   });
 });
 

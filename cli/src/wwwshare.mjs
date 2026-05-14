@@ -19,7 +19,7 @@ const USAGE =
   "usage:\n" +
   "  wwwshare <html-file> <slug>            publish a new page\n" +
   "  wwwshare update <slug> <html-file>     overwrite an existing page\n" +
-  "  wwwshare remove <slug>                 delete a page\n" +
+  "  wwwshare remove <slug>...              delete one or more pages\n" +
   "  wwwshare list                          list every live slug, one per line\n" +
   "\n" +
   "Flags (create / update):\n" +
@@ -56,16 +56,16 @@ export function parseArgs(argv) {
   }
 
   if (verb === "remove") {
-    if (args.length !== 2) throw new Error(USAGE);
+    if (args.length < 2) throw new Error(USAGE);
     if (trust) {
       throw new Error(`--trust is not valid with remove\n\n${USAGE}`);
     }
     if (noCp) {
       throw new Error(`--no-cp is not valid with remove\n\n${USAGE}`);
     }
-    const slug = args[1];
-    requireSlug(slug);
-    return { action: "remove", slug };
+    const slugs = args.slice(1);
+    for (const slug of slugs) requireSlug(slug);
+    return { action: "remove", slugs };
   }
 
   if (verb === "list") {
@@ -189,6 +189,40 @@ export async function deletePage({
   throw await buildHttpError(response, "Remove failed");
 }
 
+export async function removeMany({
+  endpoint,
+  token,
+  slugs,
+  fetchImpl = globalThis.fetch,
+  stdout = process.stdout,
+  stderr = process.stderr,
+}) {
+  let failures = 0;
+  for (const slug of slugs) {
+    try {
+      const { url } = await deletePage({ endpoint, token, slug, fetchImpl });
+      stdout.write(`✓ Removed "${slug}"\n  ${url}\n`);
+    } catch (err) {
+      // Only HTTP failures from deletePage carry a numeric status. Anything
+      // else (bad endpoint URL, DNS / network failure, programmer bug) would
+      // hit every slug the same way — let it propagate instead of being
+      // swallowed per-slug.
+      if (typeof err.status !== "number") throw err;
+      failures++;
+      writeFailure(stderr, err);
+      if (err.status === 401) return { failures };
+    }
+  }
+  return { failures };
+}
+
+function writeFailure(stderr, err) {
+  stderr.write(`✗ ${err.message}\n`);
+  if (err.status === 401) {
+    stderr.write("  Check WWWSHARE_UPLOAD_TOKEN\n");
+  }
+}
+
 async function buildHttpError(response, prefix) {
   const bodyText = await response.text().catch(() => "");
   let parsed = null;
@@ -279,8 +313,12 @@ async function main() {
   }
 
   if (parsed.action === "remove") {
-    const { url } = await deletePage({ endpoint, token, slug: parsed.slug });
-    process.stdout.write(`✓ Removed "${parsed.slug}"\n  ${url}\n`);
+    const { failures } = await removeMany({
+      endpoint,
+      token,
+      slugs: parsed.slugs,
+    });
+    if (failures > 0) process.exitCode = 1;
     return;
   }
 
@@ -341,10 +379,7 @@ function invokedAsScript() {
 
 if (invokedAsScript()) {
   main().catch((err) => {
-    process.stderr.write(`✗ ${err.message}\n`);
-    if (err.status === 401) {
-      process.stderr.write("  Check WWWSHARE_UPLOAD_TOKEN\n");
-    }
+    writeFailure(process.stderr, err);
     process.exit(1);
   });
 }
