@@ -1,14 +1,14 @@
 # wwwshare
 
-Publish a single, self-contained HTML file to a short URL.
+Publish a single, self-contained HTML file to a short URL, hosted on Cloudflare.
 
 ```sh
 wwwshare ./talk.html my-talk
 # ✓ Published "my-talk"
-#   https://wwwshare.example.com/p/my-talk
+#   https://wwwshare.yourname.workers.dev/p/my-talk
 ```
 
-That's it. The bytes go to R2 verbatim and are served back with an inline-script/style CSP — perfect for hand-authored documents with SVG diagrams, embedded styles, and inline JavaScript. 
+That's it. 
 
 By default the page is loaded in a CSP `sandbox` so its scripts run but can't touch cookies or localStorage on the wwwshare origin; pass `--trust` to opt out.
 
@@ -36,10 +36,12 @@ The Worker has four endpoints:
 
 Slugs match `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` (1–64 chars, lowercase + digits + dash, no leading/trailing dash).
 
-## Local development
+## Install and local development
+
+Intall `npm` and `node` if not already. Then:
 
 ```sh
-git clone https://github.com/sdunietz/wwwshare.git
+git clone https://github.com/samdunietz/wwwshare.git
 cd wwwshare
 npm install
 echo "WWWSHARE_UPLOAD_TOKEN=devtoken" > worker/.dev.vars
@@ -49,8 +51,8 @@ cp cli/.env.example cli/.env
 Both `worker/.dev.vars` and `cli/.env` are gitignored. `cli/.env.example` already points at `http://localhost:8787` with `token=devtoken`, matching `worker/.dev.vars`.
 
 ```sh
-npm test            # 113 tests
-npm run dev         # http://localhost:8787 (ctrl-C to stop)
+npm test
+npm run dev
 ```
 
 In another shell:
@@ -93,8 +95,6 @@ EOF
 echo "✓ Deployed to $DEPLOY_URL"
 echo "✓ CLI config at ~/.config/wwwshare/.env (mode 0600)"
 ```
-
-If you want a custom domain (recommended — see Security below), bind a route in the Cloudflare dashboard and update `WWWSHARE_ENDPOINT` in `~/.config/wwwshare/.env`.
 
 To rotate the token later, re-run the `TOKEN=…` line through the `~/.config/wwwshare/.env` write.
 
@@ -161,7 +161,7 @@ A token holder can:
 
 Practical implications:
 
-1. **Use a separate origin/subdomain from anything cookie-authenticated.** A dedicated subdomain (e.g. `pages.example.com`) keeps the script grant from leaking into your main site's cookie scope. The sandbox default mitigates this for unaudited pages but a `--trust` upload still gets full same-origin powers.
+1. **Use a separate origin/subdomain from anything cookie-authenticated.** A dedicated subdomain (e.g. `pages.example.com`) keeps the script grant from leaking into your main site's cookie scope. The sandbox default mitigates this for unaudited pages but a `--trust` upload still gets full same-origin powers. To set up a custom domain, bind a route in the Cloudflare dashboard and update `WWWSHARE_ENDPOINT` in `~/.config/wwwshare/.env`.
 2. **Generate a strong token** (the snippet above gives ~256 bits) and rotate it if it ever leaks. To rotate, `wrangler secret put WWWSHARE_UPLOAD_TOKEN --config wrangler.prod.toml` again.
 3. **Reads are unauthenticated, "unlisted by obscurity."** Anyone who knows or guesses a slug can fetch the page. Short, human-readable slugs are easy to guess — use longer or less guessable slugs for anything you want to keep semi-private.
 
@@ -174,7 +174,5 @@ WWWSHARE_BUCKET/
 └── {slug}/
     └── index.html
 ```
-
-That's the whole R2 layout. The directory shape leaves room to grow per-page assets (e.g. `{slug}/img/foo.png`) without a key migration; today, nothing else lives there.
 
 Upload writes a single R2 object atomically. Readers either see the page or 404 — no partial states. (Concurrent writers can still last-write-win on the same slug; for single-user CLI use that's fine.)
