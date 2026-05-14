@@ -36,7 +36,7 @@ The Worker has four endpoints:
 
 Slugs match `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` (1–64 chars, lowercase + digits + dash, no leading/trailing dash).
 
-## Install and local development
+## Install
 
 This script is intended for macOS and Linux.
 
@@ -55,27 +55,26 @@ echo "WWWSHARE_UPLOAD_TOKEN=devtoken" > worker/.dev.vars
 npm test
 ```
 
-Then start the dev server:
+Now install the CLI onto your PATH:
+
+```sh
+( cd cli && npm link )
+```
+
+## Local development (skip if you just want to deploy to Cloudflare)
+
+Start the dev server:
 
 ```sh
 npm run dev
 ```
 
-In another shell, publish to the local worker:
+In another shell, publish to the dev worker. Inline env vars override `~/.config/wwwshare/.env` so they don't touch a prod config — but they're easy to forget, so use an alias to avoid accidentally hitting prod:
 
 ```sh
-npm run publish:dev -- ./some-file.html my-slug
+alias wwwshare-dev='WWWSHARE_ENDPOINT=http://localhost:8787 WWWSHARE_UPLOAD_TOKEN=devtoken wwwshare' # Replace 8787 with the `npm run dev` port
+wwwshare-dev ./some-file.html my-slug
 ```
-
-`publish:dev` sets `WWWSHARE_ENDPOINT=http://localhost:8787` and `WWWSHARE_UPLOAD_TOKEN=devtoken` for the one invocation, so it doesn't bleed into the installed `wwwshare` reading `~/.config/wwwshare/.env`.
-
-## Install the CLI
-
-```sh
-cd cli && npm link
-```
-
-This drops a `wwwshare` symlink into npm's global bin directory, which is already on `$PATH` if Node was installed normally.
 
 ## Deploying to Cloudflare
 
@@ -232,4 +231,4 @@ WWWSHARE_BUCKET/
     └── index.html
 ```
 
-Upload writes a single R2 object atomically. (If concurrent writers, last-write-wins on the same slug.)
+Upload writes a single R2 object atomically. (If there are concurrent writers, last-write-wins on the same slug.)

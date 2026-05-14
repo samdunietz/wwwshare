@@ -5,7 +5,6 @@
   "workspaces": ["worker", "cli"],
   "scripts": {
     "dev": "npm run dev --workspace=@wwwshare/worker",
-    "publish:dev": "WWWSHARE_ENDPOINT=http://localhost:8787 WWWSHARE_UPLOAD_TOKEN=devtoken node cli/src/wwwshare.mjs",
     "test": "npm test --workspaces --if-present"
   }
 }

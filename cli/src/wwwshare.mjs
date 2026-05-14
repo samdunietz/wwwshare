@@ -209,7 +209,8 @@ export async function copyToClipboard(text, commands = CLIPBOARD_COMMANDS) {
 
 // Config: $XDG_CONFIG_HOME/wwwshare/.env (default: ~/.config/wwwshare/.env).
 // Shell env wins over the file (dotenv "don't override existing" default),
-// which is how the `publish:dev` npm script points the CLI at wrangler dev.
+// so an inline `WWWSHARE_ENDPOINT=… WWWSHARE_UPLOAD_TOKEN=… wwwshare …`
+// can point at a local dev worker without touching the prod config.
 //
 // Exported for tests.
 export function loadEnv() {
