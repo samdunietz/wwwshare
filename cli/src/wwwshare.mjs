@@ -207,19 +207,14 @@ export async function copyToClipboard(text, commands = CLIPBOARD_COMMANDS) {
   return false;
 }
 
-// Config lookup order (first hit wins per var; shell env always wins over
-// both, via dotenv's "don't override existing" default):
-//
-//   1. cli/.env (next to script)  — for hacking on the repo
-//   2. $XDG_CONFIG_HOME/wwwshare/.env (default: ~/.config/wwwshare/.env)
-//                                  — for the symlinked-into-PATH install
+// Config: $XDG_CONFIG_HOME/wwwshare/.env (default: ~/.config/wwwshare/.env).
+// Shell env wins over the file (dotenv "don't override existing" default),
+// which is how the `publish:dev` npm script points the CLI at wrangler dev.
 //
 // Exported for tests.
 export function loadEnv() {
-  const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const xdgConfigHome =
     process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
-  dotenv.config({ path: path.resolve(scriptDir, "../.env"), quiet: true });
   dotenv.config({
     path: path.join(xdgConfigHome, "wwwshare", ".env"),
     quiet: true,
@@ -233,7 +228,7 @@ async function main() {
   const token = process.env.WWWSHARE_UPLOAD_TOKEN;
   if (!token) {
     throw new Error(
-      "WWWSHARE_UPLOAD_TOKEN is not set (copy cli/.env.example to cli/.env or export it in your shell)",
+      "WWWSHARE_UPLOAD_TOKEN is not set (add it to ~/.config/wwwshare/.env or export it in your shell)",
     );
   }
   const endpoint = process.env.WWWSHARE_ENDPOINT;

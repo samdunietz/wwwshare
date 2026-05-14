@@ -47,21 +47,22 @@ git clone https://github.com/samdunietz/wwwshare.git
 cd wwwshare
 npm install
 echo "WWWSHARE_UPLOAD_TOKEN=devtoken" > worker/.dev.vars
-cp cli/.env.example cli/.env
 ```
 
-Both `worker/.dev.vars` and `cli/.env` are gitignored. `cli/.env.example` already points at `http://localhost:8787` with `token=devtoken`, matching `worker/.dev.vars`.
+`worker/.dev.vars` is gitignored. Then:
 
 ```sh
 npm test
 npm run dev
 ```
 
-In another shell:
+In another shell, publish to the local worker:
 
 ```sh
-node cli/src/wwwshare.mjs ./some-file.html my-slug
+npm run publish:dev -- ./some-file.html my-slug
 ```
+
+`publish:dev` sets `WWWSHARE_ENDPOINT=http://localhost:8787` and `WWWSHARE_UPLOAD_TOKEN=devtoken` for the one invocation, so it doesn't bleed into the installed `wwwshare` reading `~/.config/wwwshare/.env`.
 
 ## Deploying to Cloudflare
 
