@@ -1,4 +1,4 @@
-import { SELF, env } from "cloudflare:test";
+import { env, exports } from "cloudflare:workers";
 import { describe, it, expect, beforeEach } from "vitest";
 import { clearBucket } from "./helpers.js";
 import { VALID_SLUGS, INVALID_SLUGS } from "./slug-fixtures.js";
@@ -19,7 +19,7 @@ describe("/p/{slug} — GET", () => {
   beforeEach(() => clearBucket(env));
 
   it("404 on missing slug", async () => {
-    const res = await SELF.fetch(`${ORIGIN}/p/ghost`);
+    const res = await exports.default.fetch(`${ORIGIN}/p/ghost`);
     expect(res.status).toBe(404);
   });
 
@@ -30,7 +30,7 @@ describe("/p/{slug} — GET", () => {
     ]);
     await seedPage("page-1", bytes);
 
-    const res = await SELF.fetch(`${ORIGIN}/p/page-1`);
+    const res = await exports.default.fetch(`${ORIGIN}/p/page-1`);
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
     expect(res.headers.get("Cache-Control")).toBe("public, max-age=3600");
@@ -47,7 +47,7 @@ describe("/p/{slug} — GET", () => {
   });
 
   it("404 on a slug that doesn't match the route regex (route miss)", async () => {
-    const res = await SELF.fetch(`${ORIGIN}/p/Bad-Slug`);
+    const res = await exports.default.fetch(`${ORIGIN}/p/Bad-Slug`);
     expect(res.status).toBe(404);
   });
 });
@@ -57,7 +57,7 @@ describe("/p/{slug} — HEAD", () => {
 
   it("200 with same headers and empty body for a present page", async () => {
     await seedPage("head-page", "<p>hi</p>");
-    const res = await SELF.fetch(`${ORIGIN}/p/head-page`, { method: "HEAD" });
+    const res = await exports.default.fetch(`${ORIGIN}/p/head-page`, { method: "HEAD" });
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
     expect(res.headers.get("Content-Security-Policy")).toContain(
@@ -67,7 +67,7 @@ describe("/p/{slug} — HEAD", () => {
   });
 
   it("404 on a missing slug", async () => {
-    const res = await SELF.fetch(`${ORIGIN}/p/missing`, { method: "HEAD" });
+    const res = await exports.default.fetch(`${ORIGIN}/p/missing`, { method: "HEAD" });
     expect(res.status).toBe(404);
   });
 });
@@ -77,7 +77,7 @@ describe("/p/{slug} — CSP varies by trust", () => {
 
   it("default page gets sandboxed CSP (no customMetadata.trusted)", async () => {
     await seedPage("sandboxed-default", "<p>hi</p>");
-    const res = await SELF.fetch(`${ORIGIN}/p/sandboxed-default`);
+    const res = await exports.default.fetch(`${ORIGIN}/p/sandboxed-default`);
     expect(res.status).toBe(200);
     const csp = res.headers.get("Content-Security-Policy");
     // Drain the body so R2's isolated-storage stack can pop at teardown.
@@ -91,7 +91,7 @@ describe("/p/{slug} — CSP varies by trust", () => {
 
   it("trusted page gets the non-sandbox CSP", async () => {
     await seedPage("trusted", "<p>hi</p>", { trusted: true });
-    const res = await SELF.fetch(`${ORIGIN}/p/trusted`);
+    const res = await exports.default.fetch(`${ORIGIN}/p/trusted`);
     expect(res.status).toBe(200);
     const csp = res.headers.get("Content-Security-Policy");
     await res.arrayBuffer();
@@ -101,7 +101,7 @@ describe("/p/{slug} — CSP varies by trust", () => {
 
   it("HEAD on sandboxed page returns sandbox CSP", async () => {
     await seedPage("sandbox-head", "<p>hi</p>");
-    const res = await SELF.fetch(`${ORIGIN}/p/sandbox-head`, {
+    const res = await exports.default.fetch(`${ORIGIN}/p/sandbox-head`, {
       method: "HEAD",
     });
     expect(res.status).toBe(200);
@@ -110,7 +110,7 @@ describe("/p/{slug} — CSP varies by trust", () => {
 
   it("HEAD on trusted page returns non-sandbox CSP", async () => {
     await seedPage("trust-head", "<p>hi</p>", { trusted: true });
-    const res = await SELF.fetch(`${ORIGIN}/p/trust-head`, { method: "HEAD" });
+    const res = await exports.default.fetch(`${ORIGIN}/p/trust-head`, { method: "HEAD" });
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Security-Policy")).not.toContain("sandbox");
   });
@@ -121,7 +121,7 @@ describe("/p/{slug} — DELETE", () => {
 
   it("401 with no Authorization header; R2 object remains", async () => {
     await seedPage("guarded", "<p>x</p>");
-    const res = await SELF.fetch(`${ORIGIN}/p/guarded`, { method: "DELETE" });
+    const res = await exports.default.fetch(`${ORIGIN}/p/guarded`, { method: "DELETE" });
     expect(res.status).toBe(401);
 
     // head() avoids leaving an unconsumed R2 body stream open at teardown.
@@ -131,7 +131,7 @@ describe("/p/{slug} — DELETE", () => {
 
   it("401 with wrong bearer; R2 object remains", async () => {
     await seedPage("guarded2", "<p>x</p>");
-    const res = await SELF.fetch(`${ORIGIN}/p/guarded2`, {
+    const res = await exports.default.fetch(`${ORIGIN}/p/guarded2`, {
       method: "DELETE",
       headers: { Authorization: "Bearer wrong" },
     });
@@ -142,7 +142,7 @@ describe("/p/{slug} — DELETE", () => {
   });
 
   it("404 on auth'd delete of nonexistent slug", async () => {
-    const res = await SELF.fetch(`${ORIGIN}/p/never`, {
+    const res = await exports.default.fetch(`${ORIGIN}/p/never`, {
       method: "DELETE",
       headers: { Authorization: AUTH },
     });
@@ -151,7 +151,7 @@ describe("/p/{slug} — DELETE", () => {
 
   it("204 happy path with no body; R2 key removed", async () => {
     await seedPage("doomed", "<p>x</p>");
-    const res = await SELF.fetch(`${ORIGIN}/p/doomed`, {
+    const res = await exports.default.fetch(`${ORIGIN}/p/doomed`, {
       method: "DELETE",
       headers: { Authorization: AUTH },
     });
@@ -165,7 +165,7 @@ describe("/p/{slug} — DELETE", () => {
 
 describe("/p/{slug} — method handling", () => {
   it("405 with Allow: GET, HEAD, DELETE on PUT", async () => {
-    const res = await SELF.fetch(`${ORIGIN}/p/some-slug`, {
+    const res = await exports.default.fetch(`${ORIGIN}/p/some-slug`, {
       method: "PUT",
       headers: { Authorization: AUTH },
     });
@@ -174,7 +174,7 @@ describe("/p/{slug} — method handling", () => {
   });
 
   it("405 with Allow: GET, HEAD, DELETE on PATCH", async () => {
-    const res = await SELF.fetch(`${ORIGIN}/p/some-slug`, {
+    const res = await exports.default.fetch(`${ORIGIN}/p/some-slug`, {
       method: "PATCH",
       headers: { Authorization: AUTH },
     });
@@ -183,7 +183,7 @@ describe("/p/{slug} — method handling", () => {
   });
 
   it("405 with Allow: GET, HEAD, DELETE on POST to a slug path", async () => {
-    const res = await SELF.fetch(`${ORIGIN}/p/some-slug`, {
+    const res = await exports.default.fetch(`${ORIGIN}/p/some-slug`, {
       method: "POST",
       headers: { Authorization: AUTH },
     });
@@ -198,7 +198,7 @@ describe("/p/{slug} — method handling", () => {
 describe("/p/{slug} — slug parity (route matching)", () => {
   for (const slug of VALID_SLUGS) {
     it(`route accepts valid slug ${JSON.stringify(slug)} (DELETE → 401)`, async () => {
-      const res = await SELF.fetch(`${ORIGIN}/p/${slug}`, { method: "DELETE" });
+      const res = await exports.default.fetch(`${ORIGIN}/p/${slug}`, { method: "DELETE" });
       expect(res.status).toBe(401);
     });
   }
@@ -213,7 +213,7 @@ describe("/p/{slug} — slug parity (route matching)", () => {
     // reason; outside the slug-parity contract.
     if (slug === "abc/def") continue;
     it(`route rejects invalid slug ${JSON.stringify(slug)} (${label}) (DELETE → 404)`, async () => {
-      const res = await SELF.fetch(`${ORIGIN}/p/${encodeURIComponent(slug)}`, {
+      const res = await exports.default.fetch(`${ORIGIN}/p/${encodeURIComponent(slug)}`, {
         method: "DELETE",
       });
       expect(res.status).toBe(404);

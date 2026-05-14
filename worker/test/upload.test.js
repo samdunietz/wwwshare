@@ -1,4 +1,4 @@
-import { SELF, env } from "cloudflare:test";
+import { env, exports } from "cloudflare:workers";
 import { describe, it, expect, beforeEach } from "vitest";
 import { clearBucket } from "./helpers.js";
 import { VALID_SLUGS, INVALID_SLUGS } from "./slug-fixtures.js";
@@ -49,7 +49,7 @@ function buildForm({
 }
 
 async function postUpload(form, { headers = {} } = {}) {
-  return SELF.fetch(`${ORIGIN}/upload`, {
+  return exports.default.fetch(`${ORIGIN}/upload`, {
     method: "POST",
     headers: { Authorization: AUTH, ...headers },
     body: form,
@@ -71,7 +71,7 @@ describe("/upload — auth", () => {
   beforeEach(() => clearBucket(env));
 
   it("returns 401 with no Authorization header", async () => {
-    const res = await SELF.fetch(`${ORIGIN}/upload`, {
+    const res = await exports.default.fetch(`${ORIGIN}/upload`, {
       method: "POST",
       body: buildForm(),
     });
@@ -91,7 +91,7 @@ describe("/upload — content-type / size", () => {
   beforeEach(() => clearBucket(env));
 
   it("returns 415 for non-multipart Content-Type", async () => {
-    const res = await SELF.fetch(`${ORIGIN}/upload`, {
+    const res = await exports.default.fetch(`${ORIGIN}/upload`, {
       method: "POST",
       headers: { Authorization: AUTH, "Content-Type": "application/json" },
       body: JSON.stringify({ slug: "abc", html: "<p>x</p>" }),
@@ -101,7 +101,7 @@ describe("/upload — content-type / size", () => {
 
   it("returns 413 when declared Content-Length exceeds cap", async () => {
     const form = buildForm();
-    const res = await SELF.fetch(`${ORIGIN}/upload`, {
+    const res = await exports.default.fetch(`${ORIGIN}/upload`, {
       method: "POST",
       headers: {
         Authorization: AUTH,
@@ -120,7 +120,7 @@ describe("/upload — content-type / size", () => {
   });
 
   it("returns 400 on malformed multipart body", async () => {
-    const res = await SELF.fetch(`${ORIGIN}/upload`, {
+    const res = await exports.default.fetch(`${ORIGIN}/upload`, {
       method: "POST",
       headers: {
         Authorization: AUTH,
@@ -368,13 +368,13 @@ describe("/upload — trusted field", () => {
 
 describe("/upload — method handling", () => {
   it("405 with Allow: POST on GET", async () => {
-    const res = await SELF.fetch(`${ORIGIN}/upload`);
+    const res = await exports.default.fetch(`${ORIGIN}/upload`);
     expect(res.status).toBe(405);
     expect(res.headers.get("Allow")).toBe("POST");
   });
 
   it("405 with Allow: POST on DELETE", async () => {
-    const res = await SELF.fetch(`${ORIGIN}/upload`, {
+    const res = await exports.default.fetch(`${ORIGIN}/upload`, {
       method: "DELETE",
       headers: { Authorization: AUTH },
     });
