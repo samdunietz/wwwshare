@@ -48,26 +48,46 @@ You now have the wwwshare command, but it needs a deployed Cloudflare Worker to 
 
 ## Deploying to Cloudflare
 
-Prerequisites: a Cloudflare account with Workers + R2 enabled, and `npx wrangler login` already run.
+**Prerequisites:**
+
+1. A [Cloudflare account](https://dash.cloudflare.com/sign-up).
+2. **Enable R2** (one-time): in the dashboard go to **Storage & databases → R2 → Overview** and complete the checkout to activate R2. A valid payment method may be required, even though R2's free tier comfortably covers this use.
+3. Log in the CLI: `npx wrangler login`.
 
 The prod setup creates the bucket, deploys the Worker, generates a 256-bit random token, and sets it both as a Worker secret and in your local CLI config.
 
 ```sh
-cd worker
+# This whole block runs in a subshell so a failed pre-flight check can
+# `exit` without closing your terminal.
+(
+  cd worker || exit 1
 
-# Create the prod R2 bucket. Edit wrangler.prod.toml if you want a
-# different bucket name.
-npx wrangler r2 bucket create wwwshare-content
+  # Pre-flight: fail fast with actionable messages before deploying.
+  if ! npx wrangler whoami --json >/dev/null 2>&1; then
+    echo "❌ Not logged in to Cloudflare. Run: npx wrangler login" >&2
+    exit 1
+  fi
+  if ! npx wrangler r2 bucket list >/dev/null 2>&1; then
+    echo "❌ Couldn't list R2 buckets. Make sure R2 is enabled on this account" >&2
+    echo "   (see the Prerequisites above)." >&2
+    exit 1
+  fi
 
-# Deploy. Captures the workers.dev URL for the CLI config below.
-# Safe to deploy before setting the secret: src/auth.js fails closed
-# while WWWSHARE_UPLOAD_TOKEN is unset, so the Worker 401s on every
-# upload until the secret is in place.
-DEPLOY_OUT=$(npx wrangler deploy --config wrangler.prod.toml 2>&1 | tee /dev/tty)
-DEPLOY_URL=$(printf '%s\n' "$DEPLOY_OUT" | grep -oE 'https://[a-z0-9.-]+\.workers\.dev' | head -1)
-if [ -z "$DEPLOY_URL" ]; then
-  echo "❌ Could not find a workers.dev URL in the deploy output above. Skipping token generation — re-check the output and re-run this block." >&2
-else
+  # Create the prod R2 bucket. Edit wrangler.prod.toml if you want a
+  # different bucket name.
+  npx wrangler r2 bucket create wwwshare-content
+
+  # Deploy. Captures the workers.dev URL for the CLI config below.
+  # Safe to deploy before setting the secret: src/auth.js fails closed
+  # while WWWSHARE_UPLOAD_TOKEN is unset, so the Worker 401s on every
+  # upload until the secret is in place.
+  DEPLOY_OUT=$(npx wrangler deploy --config wrangler.prod.toml 2>&1 | tee /dev/tty)
+  DEPLOY_URL=$(printf '%s\n' "$DEPLOY_OUT" | grep -oE 'https://[a-z0-9.-]+\.workers\.dev' | head -1)
+  if [ -z "$DEPLOY_URL" ]; then
+    echo "❌ Could not find a workers.dev URL in the deploy output above. Re-check the output and re-run this block." >&2
+    exit 1
+  fi
+
   # Generate token, set as Worker secret, write local CLI config.
   TOKEN=$(node -e 'console.log(require("crypto").randomBytes(32).toString("base64url"))')
   printf '%s' "$TOKEN" | npx wrangler secret put WWWSHARE_UPLOAD_TOKEN --config wrangler.prod.toml
@@ -81,7 +101,7 @@ EOF
 
   echo "✓ Deployed to $DEPLOY_URL"
   echo "✓ CLI config at ~/.config/wwwshare/.env (mode 0600)"
-fi
+)
 ```
 
 `wwwshare` away!
