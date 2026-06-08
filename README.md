@@ -114,6 +114,7 @@ wwwshare <html-file> <slug> --trust          # publish without the sandbox
 wwwshare update <slug> <html-file> [--trust] # overwrite an existing page
 wwwshare remove <slug>...                    # delete one or more pages
 wwwshare list                                # list every live slug, one per line
+wwwshare open <slug>                         # open a published page in your browser
 ```
 
 On a successful publish/update, the URL is printed (and copied to the system clipboard unless `--no-cp` is added). To download a page, hit `/p/{slug}` directly — e.g. `wget "$WWWSHARE_ENDPOINT/p/<slug>"`.

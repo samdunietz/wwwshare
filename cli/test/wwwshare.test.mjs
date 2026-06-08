@@ -6,6 +6,9 @@ import {
   deletePage,
   listPages,
   removeMany,
+  pageUrl,
+  browserOpener,
+  openInBrowser,
 } from "../src/wwwshare.mjs";
 
 // Slug-parity fixture — must agree with worker/test/upload.test.js. If
@@ -119,6 +122,41 @@ describe("parseArgs — list form", () => {
   it("rejects --no-cp on list", () => {
     expect(() => parseArgs([...HEAD, "list", "--no-cp"])).toThrow(
       /--no-cp is not valid with list/,
+    );
+  });
+});
+
+describe("parseArgs — open form", () => {
+  it("returns action=open with the slug", () => {
+    expect(parseArgs([...HEAD, "open", "my-page"])).toEqual({
+      action: "open",
+      slug: "my-page",
+    });
+  });
+
+  it("throws usage on missing slug", () => {
+    expect(() => parseArgs([...HEAD, "open"])).toThrow(/usage:/);
+  });
+
+  it("throws usage on extra positional", () => {
+    expect(() => parseArgs([...HEAD, "open", "a", "b"])).toThrow(/usage:/);
+  });
+
+  it("rejects an invalid slug before any launch", () => {
+    expect(() => parseArgs([...HEAD, "open", "BAD_SLUG"])).toThrow(
+      /invalid slug format/,
+    );
+  });
+
+  it("rejects --trust on open", () => {
+    expect(() => parseArgs([...HEAD, "open", "abc", "--trust"])).toThrow(
+      /--trust is not valid with open/,
+    );
+  });
+
+  it("rejects --no-cp on open", () => {
+    expect(() => parseArgs([...HEAD, "open", "abc", "--no-cp"])).toThrow(
+      /--no-cp is not valid with open/,
     );
   });
 });
@@ -682,5 +720,55 @@ describe("listPages", () => {
         fetchImpl,
       }),
     ).rejects.toThrow(/malformed response/);
+  });
+});
+
+describe("pageUrl", () => {
+  it("builds the public /p/<slug> URL", () => {
+    expect(pageUrl("https://x.example", "foo")).toBe(
+      "https://x.example/p/foo",
+    );
+  });
+
+  it("handles a trailing slash on the endpoint", () => {
+    expect(pageUrl("https://x.example/", "foo")).toBe(
+      "https://x.example/p/foo",
+    );
+  });
+
+  it("resolves origin-relative, stripping any path on the endpoint", () => {
+    expect(pageUrl("https://x.example/base", "foo")).toBe(
+      "https://x.example/p/foo",
+    );
+  });
+
+  it("works against a custom domain", () => {
+    expect(pageUrl("https://share.example.com", "foo")).toBe(
+      "https://share.example.com/p/foo",
+    );
+  });
+});
+
+describe("browserOpener", () => {
+  it("maps darwin to open", () => {
+    expect(browserOpener("darwin")).toEqual({ cmd: "open", args: [] });
+  });
+
+  it("maps linux to xdg-open", () => {
+    expect(browserOpener("linux")).toEqual({ cmd: "xdg-open", args: [] });
+  });
+
+  it("falls through to xdg-open on unsupported platforms", () => {
+    expect(browserOpener("win32")).toEqual({ cmd: "xdg-open", args: [] });
+  });
+});
+
+describe("openInBrowser", () => {
+  it("resolves false (without throwing) when the launcher is missing", async () => {
+    const result = await openInBrowser("https://x.example/p/foo", {
+      cmd: "definitely-no-such-binary-xyz",
+      args: [],
+    });
+    expect(result).toBe(false);
   });
 });

@@ -21,6 +21,7 @@ const USAGE =
   "  wwwshare update <slug> <html-file>     overwrite an existing page\n" +
   "  wwwshare remove <slug>...              delete one or more pages\n" +
   "  wwwshare list                          list every live slug, one per line\n" +
+  "  wwwshare open <slug>                   open a published page in your browser\n" +
   "\n" +
   "Flags (create / update):\n" +
   "  --trust    skip the default CSP sandbox; grant the page same-origin\n" +
@@ -77,6 +78,19 @@ export function parseArgs(argv) {
       throw new Error(`--no-cp is not valid with list\n\n${USAGE}`);
     }
     return { action: "list" };
+  }
+
+  if (verb === "open") {
+    if (args.length !== 2) throw new Error(USAGE);
+    if (trust) {
+      throw new Error(`--trust is not valid with open\n\n${USAGE}`);
+    }
+    if (noCp) {
+      throw new Error(`--no-cp is not valid with open\n\n${USAGE}`);
+    }
+    const slug = args[1];
+    requireSlug(slug);
+    return { action: "open", slug };
   }
 
   if (args.length !== 2) throw new Error(USAGE);
@@ -174,7 +188,7 @@ export async function deletePage({
     throw new TypeError("deletePage: slug must be a string");
   }
 
-  const url = new URL(`/p/${slug}`, endpoint).toString();
+  const url = pageUrl(endpoint, slug);
   const response = await fetchImpl(url, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
@@ -280,6 +294,56 @@ export async function copyToClipboard(text, commands = CLIPBOARD_COMMANDS) {
   return false;
 }
 
+// Single source of truth for a page's public URL. `new URL(base, endpoint)`
+// resolves origin-relative, so a trailing slash on the endpoint — or a custom
+// domain — produces the right `…/p/<slug>`, matching how /upload and /list
+// resolve. (deletePage uses this too.)
+export function pageUrl(endpoint, slug) {
+  return new URL(`/p/${slug}`, endpoint).toString();
+}
+
+// Pure, testable platform → launcher mapping. macOS and Linux/BSD are the
+// supported platforms (see README); anything else (e.g. Windows) falls through
+// to xdg-open. When that's absent, openInBrowser degrades gracefully — the same
+// as the clipboard helper on a platform it has no command for.
+export function browserOpener(platform = process.platform) {
+  if (platform === "darwin") return { cmd: "open", args: [] };
+  return { cmd: "xdg-open", args: [] }; // linux/bsd
+}
+
+// Best-effort browser launch, modeled on tryClipboardCommand. Returns whether
+// the launcher *spawned* — NOT whether a browser rendered the page. Post-spawn
+// failures (no desktop session, no registered handler) are invisible by design;
+// the caller always prints the URL so a silent miss stays actionable.
+// detached + unref so the CLI doesn't hold the browser process open. (spawn
+// and error are mutually exclusive for the ENOENT path, so there's no settle
+// race.)
+export async function openInBrowser(url, opener = browserOpener()) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(opener.cmd, [...opener.args, url], {
+        stdio: "ignore",
+        detached: true,
+      });
+    } catch {
+      resolve(false);
+      return;
+    }
+    let settled = false;
+    const settle = (ok) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+    child.on("error", () => settle(false));
+    child.on("spawn", () => {
+      child.unref();
+      settle(true);
+    });
+  });
+}
+
 // Config: $XDG_CONFIG_HOME/wwwshare/.env (default: ~/.config/wwwshare/.env).
 // Shell env wins over the file (dotenv "don't override existing" default),
 // so an inline `WWWSHARE_ENDPOINT=… WWWSHARE_UPLOAD_TOKEN=… wwwshare …`
@@ -299,16 +363,34 @@ async function main() {
   loadEnv();
   const parsed = parseArgs(process.argv);
 
-  const token = process.env.WWWSHARE_UPLOAD_TOKEN;
-  if (!token) {
-    throw new Error(
-      "WWWSHARE_UPLOAD_TOKEN is not set (add it to ~/.config/wwwshare/.env or export it in your shell)",
-    );
-  }
   const endpoint = process.env.WWWSHARE_ENDPOINT;
   if (!endpoint) {
     throw new Error(
       "WWWSHARE_ENDPOINT is not set (e.g. https://wwwshare.example.com)",
+    );
+  }
+
+  // `open` only needs the endpoint — GET /p/<slug> is public, so no token and
+  // no network round-trip. Early-return before the token requirement.
+  if (parsed.action === "open") {
+    const url = pageUrl(endpoint, parsed.slug);
+    const launched = await openInBrowser(url);
+    // "Opening" (present tense) is honest: launched means the launcher
+    // spawned, not that the page rendered. Always print the URL so a
+    // failed/silent launch is still actionable.
+    process.stdout.write(`✓ Opening "${parsed.slug}"\n  ${url}\n`);
+    if (!launched) {
+      process.stderr.write(
+        "  (couldn't launch a browser — open the URL above manually)\n",
+      );
+    }
+    return;
+  }
+
+  const token = process.env.WWWSHARE_UPLOAD_TOKEN;
+  if (!token) {
+    throw new Error(
+      "WWWSHARE_UPLOAD_TOKEN is not set (add it to ~/.config/wwwshare/.env or export it in your shell)",
     );
   }
 
