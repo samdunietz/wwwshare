@@ -1,7 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Buffer } from "node:buffer";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   parseArgs,
   uploadPage,
@@ -12,6 +15,7 @@ import {
   browserOpener,
   openInBrowser,
   requireEndpoint,
+  readHtmlFile,
 } from "../src/wwwshare.mjs";
 
 // Slug-parity fixture — must agree with worker/test/upload.test.js. If
@@ -809,31 +813,170 @@ describe("requireEndpoint", () => {
   }
 });
 
+// Spawns the real CLI script as a child process — exercises the main()
+// wiring the unit tests can't reach. Injected env vars beat any user config
+// because dotenv never overrides existing vars — hermetic.
+function runCli(args, env) {
+  const script = fileURLToPath(new URL("../src/wwwshare.mjs", import.meta.url));
+  return new Promise((resolve) => {
+    execFile(
+      process.execPath,
+      [script, ...args],
+      { env: { ...process.env, ...env } },
+      (error, _stdout, stderr) => {
+        resolve({ code: error?.code ?? 0, stderr });
+      },
+    );
+  });
+}
+
 // One spawned-CLI test so the main() wiring itself is exercised — the unit
 // tests above would stay green if requireEndpoint existed but main() never
 // called it, leaving the user-facing bug alive. `open` needs no token and
 // makes no network call, so a bad endpoint must fail before anything else.
-// dotenv never overrides existing env vars, so the injected value beats any
-// user config — hermetic.
 describe("CLI endpoint validation (integration)", () => {
   it("fails fast with an actionable message on a scheme-less endpoint", async () => {
-    const script = fileURLToPath(
-      new URL("../src/wwwshare.mjs", import.meta.url),
-    );
-    const { code, stderr } = await new Promise((resolve) => {
-      execFile(
-        process.execPath,
-        [script, "open", "abc"],
-        { env: { ...process.env, WWWSHARE_ENDPOINT: "localhost:8787" } },
-        (error, _stdout, stderr) => {
-          resolve({ code: error?.code ?? 0, stderr });
-        },
-      );
+    const { code, stderr } = await runCli(["open", "abc"], {
+      WWWSHARE_ENDPOINT: "localhost:8787",
     });
     expect(code).toBe(1);
     expect(stderr).toMatch(/WWWSHARE_ENDPOINT/);
     expect(stderr).toMatch(/localhost:8787/);
     expect(stderr).toMatch(/https:\/\/wwwshare\.example\.com/);
+  });
+});
+
+// Resolves with the rejection of `promise` (fails loudly if it resolves), so
+// one call can back multiple assertions — message, code, cause — without
+// re-running the operation.
+function rejectionOf(promise) {
+  return promise.then(
+    () => {
+      throw new Error("expected promise to reject");
+    },
+    (err) => err,
+  );
+}
+
+describe("readHtmlFile — real filesystem", () => {
+  let dir;
+  beforeAll(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "wwwshare-test-"));
+  });
+  afterAll(() => {
+    // Cleanup works even for the chmod-000 fixture: unlink needs only
+    // directory write permission, not permission on the file itself.
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("returns the file's exact bytes (including high-bit bytes) on success", async () => {
+    const bytes = Buffer.from([
+      0x3c, 0x70, 0x3e, 0xc3, 0xa9, 0x00, 0x3c, 0x2f, 0x70, 0x3e,
+    ]);
+    const file = path.join(dir, "page.html");
+    fs.writeFileSync(file, bytes);
+    expect(await readHtmlFile(file)).toEqual(bytes);
+  });
+
+  it("throws 'file not found: <path>' with code ENOENT for a missing path", async () => {
+    const missing = path.join(dir, "definitely-missing.html");
+    const err = await rejectionOf(readHtmlFile(missing));
+    expect(err.message).toMatch(/^file not found: .*definitely-missing\.html$/);
+    expect(err.code).toBe("ENOENT");
+  });
+
+  it("throws 'is a directory, not a file: <path>' when the path is a directory", async () => {
+    const err = await rejectionOf(readHtmlFile(dir));
+    expect(err.message).toMatch(/^is a directory, not a file: /);
+    expect(err.code).toBe("EISDIR");
+  });
+
+  it("throws 'empty file: <path>' for a zero-byte file", async () => {
+    const file = path.join(dir, "empty.html");
+    fs.writeFileSync(file, "");
+    await expect(readHtmlFile(file)).rejects.toThrow(`empty file: ${file}`);
+  });
+
+  // Root bypasses mode bits and Windows lacks POSIX modes (the CLI only
+  // targets macOS/Linux; the guard is belt-and-braces).
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "throws 'permission denied reading file: <path>' for a chmod-000 file",
+    async () => {
+      const file = path.join(dir, "locked.html");
+      fs.writeFileSync(file, "<p>secret</p>");
+      fs.chmodSync(file, 0o000);
+      await expect(readHtmlFile(file)).rejects.toThrow(
+        /^permission denied reading file: /,
+      );
+    },
+  );
+});
+
+// The deterministic cross-platform contract: every mapped code produces the
+// friendly message via an injected readFileImpl, so no test depends on the
+// host OS actually producing that errno.
+describe("readHtmlFile — error-code mapping (table-driven)", () => {
+  const throwing = (code) => async () => {
+    throw Object.assign(new Error("raw node message"), { code });
+  };
+
+  const ROWS = [
+    ["ENOENT", "file not found"],
+    ["ENOTDIR", "file not found"],
+    ["EISDIR", "is a directory, not a file"],
+    ["EACCES", "permission denied reading file"],
+    ["EPERM", "permission denied reading file"],
+  ];
+
+  for (const [code, friendly] of ROWS) {
+    it(`maps ${code} to a friendly message, preserving code and cause`, async () => {
+      const err = await rejectionOf(readHtmlFile("talk.html", throwing(code)));
+      expect(err.message).toBe(`${friendly}: talk.html`);
+      expect(err.code).toBe(code);
+      expect(err.cause).toMatchObject({ message: "raw node message" });
+    });
+  }
+
+  it("rethrows the original error for an unmapped code (e.g. EMFILE)", async () => {
+    const original = Object.assign(new Error("raw node message"), {
+      code: "EMFILE",
+    });
+    await expect(
+      readHtmlFile("talk.html", async () => {
+        throw original;
+      }),
+    ).rejects.toBe(original);
+  });
+
+  it("rethrows a code-less error untouched", async () => {
+    const original = new Error("boom");
+    await expect(
+      readHtmlFile("talk.html", async () => {
+        throw original;
+      }),
+    ).rejects.toBe(original);
+  });
+});
+
+// Locks the main() wiring: the helper-only tests above would stay green if
+// main() still called fsp.readFile directly. Hermetic — main() reads the
+// file before uploadPage, so the (valid but unreachable) endpoint is never
+// contacted.
+describe("CLI file-read errors (integration)", () => {
+  it("prints the friendly message, not the raw Node error, for a missing file", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wwwshare-test-"));
+    const missing = path.join(dir, "definitely-missing.html");
+    try {
+      const { code, stderr } = await runCli([missing, "some-slug"], {
+        WWWSHARE_ENDPOINT: "http://127.0.0.1:1",
+        WWWSHARE_UPLOAD_TOKEN: "test-token",
+      });
+      expect(code).toBe(1);
+      expect(stderr).toMatch(/✗ file not found: .*definitely-missing\.html/);
+      expect(stderr).not.toMatch(/no such file or directory/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

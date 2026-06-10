@@ -397,6 +397,40 @@ export function requireEndpoint(endpoint) {
   return endpoint;
 }
 
+// Friendly prefixes for the fs failures a user can plausibly cause from the
+// command line. Anything else falls through with Node's original error.
+const FS_ERROR_MESSAGES = {
+  ENOENT: "file not found",
+  ENOTDIR: "file not found", // a path component is not a directory (e.g. page.html/extra)
+  EISDIR: "is a directory, not a file",
+  EACCES: "permission denied reading file",
+  EPERM: "permission denied reading file",
+};
+
+// Reads the page bytes, translating raw fs errors into the CLI's actionable
+// message style ("file not found: talk.html" instead of Node's
+// "ENOENT: no such file or directory, open 'talk.html'"). Bytes, not utf-8
+// text — preserves the file's exact bytes on the wire; the server stores them
+// verbatim and serves with charset=utf-8. (Use UTF-8-encoded HTML; non-UTF-8
+// renders with the wrong charset declaration.)
+// readFileImpl is injectable for tests, matching the fetchImpl pattern.
+export async function readHtmlFile(file, readFileImpl = fsp.readFile) {
+  let html;
+  try {
+    html = await readFileImpl(file);
+  } catch (err) {
+    const friendly = FS_ERROR_MESSAGES[err?.code];
+    if (!friendly) throw err; // unknown failure: original message/code is best
+    const wrapped = new Error(`${friendly}: ${file}`, { cause: err });
+    wrapped.code = err.code; // keep code semantics for programmatic callers
+    throw wrapped;
+  }
+  if (html.length === 0) {
+    throw new Error(`empty file: ${file}`);
+  }
+  return html;
+}
+
 async function main() {
   loadEnv();
   const parsed = parseArgs(process.argv);
@@ -445,14 +479,7 @@ async function main() {
     return;
   }
 
-  // Read bytes, not utf-8 text — preserves the file's exact bytes on the
-  // wire. The server stores them verbatim and serves with charset=utf-8.
-  // (Use UTF-8-encoded HTML; non-UTF-8 will render with the wrong charset
-  // declaration.)
-  const html = await fsp.readFile(parsed.file);
-  if (html.length === 0) {
-    throw new Error(`empty file: ${parsed.file}`);
-  }
+  const html = await readHtmlFile(parsed.file);
 
   const { url, slug } = await uploadPage({
     endpoint,
