@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Buffer } from "node:buffer";
+import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import {
   parseArgs,
   uploadPage,
@@ -9,6 +11,7 @@ import {
   pageUrl,
   browserOpener,
   openInBrowser,
+  requireEndpoint,
 } from "../src/wwwshare.mjs";
 
 // Slug-parity fixture — must agree with worker/test/upload.test.js. If
@@ -746,6 +749,91 @@ describe("pageUrl", () => {
     expect(pageUrl("https://share.example.com", "foo")).toBe(
       "https://share.example.com/p/foo",
     );
+  });
+});
+
+// Endpoint validation fixture. CAREFUL rows are annotated — URL parsing has
+// surprising successes ("localhost:8787" parses with scheme "localhost:"),
+// so the protocol allowlist, not the try/catch, is the load-bearing check.
+const VALID_ENDPOINTS = [
+  "https://wwwshare.example.com",
+  "http://localhost:8787", // local dev
+  "https://x.example:8443", // explicit port
+  "https://x.example/", // trailing slash
+  // Scheme shorthand: parses + normalizes; new URL(path, endpoint) resolves
+  // correctly downstream, so rejecting it would be pure pedantry.
+  "https:example.com",
+];
+const INVALID_ENDPOINTS = [
+  [undefined, "unset", /WWWSHARE_ENDPOINT is not set/],
+  ["", "empty", /WWWSHARE_ENDPOINT is not set/],
+  [
+    "wwwshare.foo.workers.dev",
+    "bare hostname",
+    /must be an http\(s\) URL .*"wwwshare\.foo\.workers\.dev"/,
+  ],
+  // Parses on current Node (protocol "localhost:") but throws on some builds;
+  // both paths produce the same allowlist error, so this row is version-proof.
+  [
+    "localhost:8787",
+    "scheme-less host:port",
+    /must be an http\(s\) URL .*"localhost:8787"/,
+  ],
+  ["localhost", "bare word", /must be an http\(s\) URL/],
+  [
+    "ftp://x.example",
+    "non-http protocol",
+    /must be an http\(s\) URL .*"ftp:\/\/x\.example"/,
+  ],
+  ["   ", "whitespace-only", /must be an http\(s\) URL/],
+  [
+    "https://user:pass@x.example",
+    "embedded credentials",
+    /must not embed credentials/,
+  ],
+];
+
+describe("requireEndpoint", () => {
+  for (const endpoint of VALID_ENDPOINTS) {
+    it(`accepts valid endpoint ${JSON.stringify(endpoint)} and returns it unchanged`, () => {
+      expect(requireEndpoint(endpoint)).toBe(endpoint);
+    });
+  }
+
+  for (const [endpoint, label, messageRe] of INVALID_ENDPOINTS) {
+    it(`rejects invalid endpoint ${JSON.stringify(endpoint)} (${label})`, () => {
+      // Every row's regex names WWWSHARE_ENDPOINT (directly or via the shared
+      // message prefix), so a bad value can never surface as a bare error.
+      expect(() => requireEndpoint(endpoint)).toThrow(messageRe);
+    });
+  }
+});
+
+// One spawned-CLI test so the main() wiring itself is exercised — the unit
+// tests above would stay green if requireEndpoint existed but main() never
+// called it, leaving the user-facing bug alive. `open` needs no token and
+// makes no network call, so a bad endpoint must fail before anything else.
+// dotenv never overrides existing env vars, so the injected value beats any
+// user config — hermetic.
+describe("CLI endpoint validation (integration)", () => {
+  it("fails fast with an actionable message on a scheme-less endpoint", async () => {
+    const script = fileURLToPath(
+      new URL("../src/wwwshare.mjs", import.meta.url),
+    );
+    const { code, stderr } = await new Promise((resolve) => {
+      execFile(
+        process.execPath,
+        [script, "open", "abc"],
+        { env: { ...process.env, WWWSHARE_ENDPOINT: "localhost:8787" } },
+        (error, _stdout, stderr) => {
+          resolve({ code: error?.code ?? 0, stderr });
+        },
+      );
+    });
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/WWWSHARE_ENDPOINT/);
+    expect(stderr).toMatch(/localhost:8787/);
+    expect(stderr).toMatch(/https:\/\/wwwshare\.example\.com/);
   });
 });
 

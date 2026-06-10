@@ -359,16 +359,49 @@ export function loadEnv() {
   });
 }
 
-async function main() {
-  loadEnv();
-  const parsed = parseArgs(process.argv);
-
-  const endpoint = process.env.WWWSHARE_ENDPOINT;
+// WWWSHARE_ENDPOINT must parse as an http(s) URL without embedded
+// credentials. Validated once, up front, because every command builds request
+// URLs from it and a bad value otherwise surfaces later as a bare
+// "Invalid URL" TypeError (or undici's cryptic credentials error) with no
+// hint which setting is wrong.
+// CAREFUL: new URL("localhost:8787") parses (scheme "localhost:"), so a
+// try/catch alone is not enough — the protocol must be allowlisted.
+// Scheme-shorthand forms like "https:example.com" normalize to real http(s)
+// URLs and resolve correctly in new URL(path, endpoint), so they pass.
+export function requireEndpoint(endpoint) {
   if (!endpoint) {
     throw new Error(
       "WWWSHARE_ENDPOINT is not set (e.g. https://wwwshare.example.com)",
     );
   }
+  let parsed;
+  try {
+    parsed = new URL(endpoint);
+  } catch {
+    parsed = null;
+  }
+  if (
+    !parsed ||
+    (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+  ) {
+    throw new Error(
+      `WWWSHARE_ENDPOINT must be an http(s) URL like "https://wwwshare.example.com" — got ${JSON.stringify(endpoint)}`,
+    );
+  }
+  // fetch refuses URLs with embedded credentials; auth is the bearer token.
+  if (parsed.username || parsed.password) {
+    throw new Error(
+      `WWWSHARE_ENDPOINT must not embed credentials — got ${JSON.stringify(endpoint)} (auth uses WWWSHARE_UPLOAD_TOKEN)`,
+    );
+  }
+  return endpoint;
+}
+
+async function main() {
+  loadEnv();
+  const parsed = parseArgs(process.argv);
+
+  const endpoint = requireEndpoint(process.env.WWWSHARE_ENDPOINT);
 
   // `open` only needs the endpoint — GET /p/<slug> is public, so no token and
   // no network round-trip. Early-return before the token requirement.
