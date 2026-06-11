@@ -89,7 +89,8 @@ The prod setup creates the bucket, deploys the Worker, generates a 256-bit rando
   fi
 
   # Seed the CLI config with the endpoint, then mint the token, set it as
-  # the Worker secret, and use it in the CLI configuration.
+  # the Worker secret, and use it in the CLI configuration in
+  # $XDG_CONFIG_HOME/wwwshare/.env, or ~/.config/wwwshare/.env by default.
   npm run set-config -- "$DEPLOY_URL" || exit 1
   npm run rotate-token || exit 1
 
@@ -167,7 +168,7 @@ On the new machine, recreate the CLI config with values from the original (repla
 npm run set-config -- https://wwwshare.<your-subdomain>.workers.dev <your-token>
 ```
 
-This writes `~/.config/wwwshare/.env` (honoring `$XDG_CONFIG_HOME`) with mode 0600.
+This writes `~/.config/wwwshare/.env` by default (honoring `$XDG_CONFIG_HOME`) with owner-only permissions, since it contains your upload token.
 
 Then put the CLI on your PATH:
 
@@ -254,6 +255,6 @@ Practical implications:
 2. **Generate a strong token** (the snippet above gives ~256 bits) and rotate it if it ever leaks — see `npm run rotate-token` below.
 3. **Reads are unauthenticated.** Anyone who knows or guesses a slug can fetch the page. Short, human-readable slugs are easy to guess — use longer or less guessable slugs for anything you want to keep semi-private. `/list` is bearer-gated, because enumerating every live slug is a stronger power than fetching any one.
 
-To rotate the token (e.g. if it leaks), run `npm run rotate-token` from anywhere inside the checkout (like `npm run deploy`). It mints a fresh 256-bit token, updates the Worker secret, and rewrites the local CLI config (`~/.config/wwwshare/.env`, honoring `$XDG_CONFIG_HOME`) — only after the secret is set, so a failed `wrangler` call leaves your config untouched. This invalidates every other machine still holding the old token; copy the printed token to them (see "Using the CLI from another machine").
+To rotate the token (e.g. if it leaks), run `npm run rotate-token` from anywhere inside the checkout (like `npm run deploy`). It mints a fresh 256-bit token, updates the Worker secret, and rewrites the local CLI config to match only after that update succeeds. This invalidates every other machine still holding the old token; copy the printed token to them (see "Using the CLI from another machine").
 
 For more on the trust boundary, see comments in `worker/src/upload.js` and `worker/src/read.js`.
