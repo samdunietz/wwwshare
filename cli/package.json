@@ -6,6 +6,7 @@
     "wwwshare": "./src/wwwshare.mjs"
   },
   "scripts": {
+    "deploy": "npm run deploy --workspace=@wwwshare/worker --",
     "test": "vitest run"
   },
   "dependencies": {

@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace=@wwwshare/worker",
+    "deploy": "npm run deploy --workspace=@wwwshare/worker --",
     "test": "npm test --workspaces --if-present",
     "test:e2e": "bats e2e"
   },

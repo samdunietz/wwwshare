@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy --config wrangler.prod.toml",
     "test": "vitest run"
   },
   "devDependencies": {

@@ -146,6 +146,18 @@ By default the page is loaded in a CSP `sandbox` so its scripts run but can't to
 
 - **25 MB cap** per upload.
 
+## Upgrading
+
+To pick up a new version of wwwshare, run from anywhere inside your wwwshare checkout:
+
+```sh
+git pull && npm install && npm run deploy
+```
+
+`npm run deploy` redeploys the Worker, but doesn't touch the authentication bearer token or the R2 bucket.
+
+**Don't** re-run the full deploy block from "Deploying to Cloudflare" above — it mints a fresh token and silently invalidates the one your machines already use (see the next section).
+
 ## Using the CLI from another machine
 
 If you've already deployed and just want to publish from a new box, **don't** re-run the deploy block above — it mints a fresh token and silently invalidates the existing one. Instead, get the CLI source on disk and recreate the config:
