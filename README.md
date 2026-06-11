@@ -261,27 +261,9 @@ A token holder can:
 Practical implications:
 
 1. **Use a separate origin/subdomain from anything cookie-authenticated.** A dedicated subdomain (e.g. `pages.example.com`) keeps the script grant from leaking into your main site's cookie scope. The sandbox mitigates this by default but a `--trust` upload still gets full same-origin powers.
-2. **Generate a strong token** (the snippet above gives ~256 bits) and rotate it if it ever leaks — see the rotation recipe below.
+2. **Generate a strong token** (the snippet above gives ~256 bits) and rotate it if it ever leaks — see `npm run rotate-token` below.
 3. **Reads are unauthenticated.** Anyone who knows or guesses a slug can fetch the page. Short, human-readable slugs are easy to guess — use longer or less guessable slugs for anything you want to keep semi-private. `/list` is bearer-gated, because enumerating every live slug is a stronger power than fetching any one.
 
-To rotate the token (e.g. if it leaks), from the repo root:
-
-```sh
-cd worker
-. ~/.config/wwwshare/.env  # preserve the existing endpoint
-
-NEW_TOKEN=$(node -e 'console.log(require("crypto").randomBytes(32).toString("base64url"))')
-printf '%s' "$NEW_TOKEN" | npx wrangler secret put WWWSHARE_UPLOAD_TOKEN --config wrangler.prod.toml
-
-( umask 077 && cat > ~/.config/wwwshare/.env <<EOF
-WWWSHARE_ENDPOINT=$WWWSHARE_ENDPOINT
-WWWSHARE_UPLOAD_TOKEN=$NEW_TOKEN
-EOF
-)
-
-echo "✓ New token: $NEW_TOKEN — copy to any other machines using this deploy."
-```
-
-This invalidates every other machine still holding the old token; push the new one to them too.
+To rotate the token (e.g. if it leaks), run `npm run rotate-token` from anywhere inside the checkout (like `npm run deploy`). It mints a fresh 256-bit token, updates the Worker secret, and rewrites the local CLI config (`~/.config/wwwshare/.env`, honoring `$XDG_CONFIG_HOME`) — only after the secret is set, so a failed `wrangler` call leaves your config untouched. This invalidates every other machine still holding the old token; copy the printed token to them (see "Using the CLI from another machine").
 
 For more on the trust boundary, see comments in `worker/src/upload.js` and `worker/src/read.js`.

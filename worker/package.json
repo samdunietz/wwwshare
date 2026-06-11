@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "wrangler dev --local",
     "deploy": "wrangler deploy --config wrangler.prod.toml",
+    "rotate-token": "node scripts/rotate-token.mjs",
     "test": "vitest run"
   },
   "devDependencies": {
