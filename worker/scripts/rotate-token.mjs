@@ -5,9 +5,8 @@
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { cliConfigPath } from "./cli-config.mjs";
 import { hasEndpoint, withNewToken } from "./env-file.mjs";
 
 const workerDir = fileURLToPath(new URL("..", import.meta.url));
@@ -17,11 +16,7 @@ function fail(message) {
   process.exit(1);
 }
 
-// Same resolution as the CLI's loadEnv(): $XDG_CONFIG_HOME/wwwshare/.env,
-// defaulting XDG_CONFIG_HOME to ~/.config.
-const xdgConfigHome =
-  process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
-const envPath = path.join(xdgConfigHome, "wwwshare", ".env");
+const envPath = cliConfigPath();
 
 const SEE_DEPLOY = `Rotation needs an existing deployment — see "Deploying to Cloudflare" in README.md.`;
 

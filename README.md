@@ -89,15 +89,11 @@ The prod setup creates the bucket, deploys the Worker, generates a 256-bit rando
   fi
 
   # Seed the CLI config with the endpoint, then mint the token, set it as
-  # the Worker secret, and finish the config — same command as rotating
-  # the token later.
-  CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/wwwshare"
-  mkdir -p "$CONFIG_DIR"
-  ( umask 077 && printf 'WWWSHARE_ENDPOINT=%s\n' "$DEPLOY_URL" > "$CONFIG_DIR/.env" )
+  # the Worker secret, and use it in the CLI configuration.
+  npm run set-config -- "$DEPLOY_URL" || exit 1
   npm run rotate-token || exit 1
 
   echo "✓ Deployed to $DEPLOY_URL"
-  echo "✓ CLI config at $CONFIG_DIR/.env (mode 0600)"
 )
 ```
 
@@ -153,7 +149,7 @@ git pull && npm install && npm run deploy
 
 `npm run deploy` redeploys the Worker, but doesn't touch the authentication bearer token or the R2 bucket.
 
-**Don't** re-run the full deploy block from "Deploying to Cloudflare" above — it mints a fresh token and silently invalidates the one your machines already use (see the next section).
+**Don't** re-run the full deploy block from "Deploying to Cloudflare" above. That code block mints a fresh token and silently invalidates the one your machines already use.
 
 ## Using the CLI from another machine
 
@@ -165,16 +161,13 @@ cd wwwshare
 npm install
 ```
 
-On the new machine, recreate `~/.config/wwwshare/.env` with values from the original (replace `<your-subdomain>` and `<your-token>`):
+On the new machine, recreate the CLI config with values from the original (replace `<your-subdomain>` and `<your-token>`):
 
 ```sh
-mkdir -p ~/.config/wwwshare
-( umask 077 && cat > ~/.config/wwwshare/.env <<EOF
-WWWSHARE_ENDPOINT=https://wwwshare.<your-subdomain>.workers.dev
-WWWSHARE_UPLOAD_TOKEN=<your-token>
-EOF
-)
+npm run set-config -- https://wwwshare.<your-subdomain>.workers.dev <your-token>
 ```
+
+This writes `~/.config/wwwshare/.env` (honoring `$XDG_CONFIG_HOME`) with mode 0600.
 
 Then put the CLI on your PATH:
 

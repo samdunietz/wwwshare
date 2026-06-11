@@ -8,6 +8,7 @@
   "scripts": {
     "deploy": "npm run deploy --workspace=@wwwshare/worker --",
     "rotate-token": "npm run rotate-token --workspace=@wwwshare/worker --",
+    "set-config": "npm run set-config --workspace=@wwwshare/worker --",
     "test": "vitest run"
   },
   "dependencies": {

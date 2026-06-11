@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hasEndpoint, withNewToken } from "../scripts/env-file.mjs";
+import { hasEndpoint, withEndpoint, withNewToken } from "../scripts/env-file.mjs";
 
 const CANONICAL =
   "WWWSHARE_ENDPOINT=https://wwwshare.example.com\nWWWSHARE_UPLOAD_TOKEN=oldtoken\n";
@@ -89,6 +89,38 @@ describe("withNewToken", () => {
   it("appends when no token line exists (no trailing newline)", () => {
     expect(withNewToken("WWWSHARE_ENDPOINT=https://e.example", "new")).toBe(
       "WWWSHARE_ENDPOINT=https://e.example\nWWWSHARE_UPLOAD_TOKEN=new\n",
+    );
+  });
+});
+
+describe("withEndpoint", () => {
+  it("replaces the endpoint line, keeping the token byte-identical", () => {
+    expect(withEndpoint(CANONICAL, "https://new.example")).toBe(
+      "WWWSHARE_ENDPOINT=https://new.example\nWWWSHARE_UPLOAD_TOKEN=oldtoken\n",
+    );
+  });
+
+  it("replaces an endpoint line with an empty value", () => {
+    expect(withEndpoint("WWWSHARE_ENDPOINT=\n", "https://new.example")).toBe(
+      "WWWSHARE_ENDPOINT=https://new.example\n",
+    );
+  });
+
+  it("replaces the `export KEY = value` form, keeping the export prefix", () => {
+    expect(
+      withEndpoint("export WWWSHARE_ENDPOINT = https://old.example\n", "https://new.example"),
+    ).toBe("export WWWSHARE_ENDPOINT=https://new.example\n");
+  });
+
+  it("appends when no endpoint line exists", () => {
+    expect(withEndpoint("WWWSHARE_UPLOAD_TOKEN=tok\n", "https://new.example")).toBe(
+      "WWWSHARE_UPLOAD_TOKEN=tok\nWWWSHARE_ENDPOINT=https://new.example\n",
+    );
+  });
+
+  it("starts a fresh (empty) file without a leading blank line", () => {
+    expect(withEndpoint("", "https://new.example")).toBe(
+      "WWWSHARE_ENDPOINT=https://new.example\n",
     );
   });
 });
