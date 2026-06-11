@@ -88,19 +88,16 @@ The prod setup creates the bucket, deploys the Worker, generates a 256-bit rando
     exit 1
   fi
 
-  # Generate token, set as Worker secret, write local CLI config.
-  TOKEN=$(node -e 'console.log(require("crypto").randomBytes(32).toString("base64url"))')
-  printf '%s' "$TOKEN" | npx wrangler secret put WWWSHARE_UPLOAD_TOKEN --config wrangler.prod.toml
-
-  mkdir -p ~/.config/wwwshare
-  ( umask 077 && cat > ~/.config/wwwshare/.env <<EOF
-WWWSHARE_ENDPOINT=$DEPLOY_URL
-WWWSHARE_UPLOAD_TOKEN=$TOKEN
-EOF
-  )
+  # Seed the CLI config with the endpoint, then mint the token, set it as
+  # the Worker secret, and finish the config — same command as rotating
+  # the token later.
+  CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/wwwshare"
+  mkdir -p "$CONFIG_DIR"
+  ( umask 077 && printf 'WWWSHARE_ENDPOINT=%s\n' "$DEPLOY_URL" > "$CONFIG_DIR/.env" )
+  npm run rotate-token || exit 1
 
   echo "✓ Deployed to $DEPLOY_URL"
-  echo "✓ CLI config at ~/.config/wwwshare/.env (mode 0600)"
+  echo "✓ CLI config at $CONFIG_DIR/.env (mode 0600)"
 )
 ```
 
