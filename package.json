@@ -2,9 +2,16 @@
   "name": "wwwshare",
   "version": "0.1.0",
   "private": true,
-  "workspaces": ["worker", "cli"],
+  "workspaces": [
+    "worker",
+    "cli"
+  ],
   "scripts": {
     "dev": "npm run dev --workspace=@wwwshare/worker",
-    "test": "npm test --workspaces --if-present"
+    "test": "npm test --workspaces --if-present",
+    "test:e2e": "bats e2e"
+  },
+  "devDependencies": {
+    "bats": "^1.13.0"
   }
 }

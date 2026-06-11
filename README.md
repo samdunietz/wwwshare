@@ -106,6 +106,14 @@ EOF
 
 `wwwshare` away!
 
+### Verify the deployment (optional)
+
+```sh
+npm run test:e2e
+```
+
+This confirms everything works end to end by publishing, fetching, updating, listing, and removing real pages against your live deployment — all under throwaway test slugs that are cleaned up afterward, leaving your deployment exactly as it found it.
+
 ## Usage
 
 ```sh
